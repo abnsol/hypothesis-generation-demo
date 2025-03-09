@@ -251,12 +251,19 @@ class BulkHypothesisDeleteAPI(Resource):
         return result, status_code
 
 class ChatAPI(Resource):
-    def __init__(self, llm):
+    def __init__(self, llm, db):
         self.llm = llm
+        self.db = db
 
     def post(self):
         query = request.form.get('query')
-        graph = request.form.get('graph')
+        hypothesis_id = request.form.get('hypothesis_id')
+        hypothesis = self.db.get_hypotheses(hypothesis_id)
+        
+        if not hypothesis:
+            return {"error": "Hypothesis not found or access denied"}, 404
+        graph = hypothesis.get('graph')
+
         response = self.llm.chat(query, graph)
         response = {"response": response}
         return response
