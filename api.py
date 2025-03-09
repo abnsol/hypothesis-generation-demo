@@ -255,15 +255,18 @@ class ChatAPI(Resource):
         self.llm = llm
         self.db = db
 
-    def post(self):
+    @token_required
+    def post(self, current_user_id):
         query = request.form.get('query')
         hypothesis_id = request.form.get('hypothesis_id')
-        hypothesis = self.db.get_hypotheses(hypothesis_id)
+
+        hypothesis = self.db.get_hypotheses(current_user_id, hypothesis_id)
+        print(f"Hypothesis: {hypothesis}")
         
         if not hypothesis:
             return {"error": "Hypothesis not found or access denied"}, 404
+        
         graph = hypothesis.get('graph')
-
         response = self.llm.chat(query, graph)
         response = {"response": response}
         return response
