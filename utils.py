@@ -1,20 +1,18 @@
 from datetime import datetime, timezone
-
 import eventlet
 from socketio_instance import socketio
 from status_tracker import status_tracker, TaskState
 from prefect.context import get_run_context
-
+from loguru import logger
 
 def emit_task_update(hypothesis_id, task_name, state, progress=0, details=None, next_task=None, error=None):
     """
-    Emits real-time updates via WebSocket - only for progress tracking
+    Emits real-time updates via WebSocket with retry mechanism
     """
     task_history = status_tracker.get_history(hypothesis_id)
 
     # Filter to only include 'started' state entries and keep the latest 5
     filtered_history = [entry for entry in task_history if entry["state"] == "completed"]
-    # latest_5_started_tasks = sorted(filtered_history, key=lambda x: x["timestamp"], reverse=True)[:5]
     latest_5_started_tasks = filtered_history[-5:]
 
     if progress == 0:
@@ -51,11 +49,18 @@ def emit_task_update(hypothesis_id, task_name, state, progress=0, details=None, 
         update["status"] = "failed"
         update["error"] = error
 
-    try:
-        # Simple direct emit with namespace
-        socketio.emit('task_update', update, room=room)
-        print(f"Emitted task update to room {room}")
-    except Exception as e:
-        print(f"Error emitting task update: {e}")
-        
+    # Emit with retry mechanism
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            socketio.emit('task_update', update, room=room)
+            logger.info(f"Emitted task update to room {room}")
+            break
+        except Exception as e:
+            if attempt == max_retries - 1:
+                logger.error(f"Failed to emit task update after {max_retries} attempts: {e}")
+                raise
+            logger.warning(f"Emit attempt {attempt + 1} failed: {e}")
+            socketio.sleep(1)  # Wait before retry
+    
     socketio.sleep(0)

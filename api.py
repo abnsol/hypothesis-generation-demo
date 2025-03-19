@@ -1,7 +1,5 @@
-from threading import Thread, Timer
 from prefect.utilities.asyncutils import sync_compatible
 from prefect.context import get_run_context
-import asyncio
 from flask import Flask, json, request, jsonify
 from flask_jwt_extended import get_jwt_identity
 from flask_restful import Resource, Api, reqparse
@@ -16,13 +14,17 @@ from prefect import flow
 from prefect.task_runners import ConcurrentTaskRunner
 from utils import emit_task_update
 from loguru import logger
+from prefect.client import get_client
+from prefect.deployments import run_deployment
+import os
 
 class EnrichAPI(Resource):
-    def __init__(self, enrichr, llm, prolog_query, db):
+    def __init__(self, enrichr, llm, prolog_query, db, work_queue_name):
         self.enrichr = enrichr
         self.llm = llm
         self.prolog_query = prolog_query
         self.db = db
+        self.work_queue_name = work_queue_name
 
     @token_required
     def get(self, current_user_id):
@@ -46,21 +48,23 @@ class EnrichAPI(Resource):
 
         existing_hypothesis = self.db.get_hypothesis_by_phenotype_and_variant(current_user_id, phenotype, variant)
 
-        # Define async flow function
-        def run_async_flow():
-            asyncio.run(async_enrichment_process(
-                enrichr=self.enrichr, 
-                llm=self.llm, 
-                prolog_query=self.prolog_query, 
-                db=self.db, 
-                current_user_id=current_user_id, 
-                phenotype=phenotype, 
-                variant=variant, 
-                hypothesis_id=existing_hypothesis['id'] if existing_hypothesis else hypothesis_id
-            ))
-
         if existing_hypothesis:
-            Thread(target=run_async_flow).start()
+            # Run the flow using the existing deployment
+            flow_run = run_deployment(
+                name="enrichment-flow-deployment/enrichment-flow",
+                parameters={
+                    "enrichr": self.enrichr,
+                    "llm": self.llm,
+                    "prolog_query": self.prolog_query,
+                    "db": self.db,
+                    "current_user_id": current_user_id,
+                    "phenotype": phenotype,
+                    "variant": variant,
+                    "hypothesis_id": existing_hypothesis['id']
+                },
+                work_queue_name=self.work_queue_name
+            )
+            
             return {"hypothesis_id": existing_hypothesis['id']}, 202
         
         # Generate hypothesis_id immediately
@@ -76,14 +80,27 @@ class EnrichAPI(Resource):
             "task_history": [],
         }
 
-        self.db.create_hypothesis(current_user_id, hypothesis_data)
+        # Save initial hypothesis state
+        self.db.create_hypothesis(hypothesis_data, current_user_id)
 
-        # Start the thread
-        Thread(target=run_async_flow).start()
+        # Run the flow using the existing deployment
+        flow_run = run_deployment(
+            name="enrichment-flow-deployment/enrichment-flow",
+            parameters={
+                "enrichr": self.enrichr,
+                "llm": self.llm,
+                "prolog_query": self.prolog_query,
+                "db": self.db,
+                "current_user_id": current_user_id,
+                "phenotype": phenotype,
+                "variant": variant,
+                "hypothesis_id": hypothesis_id
+            },
+            work_queue_name=self.work_queue_name
+        )
 
-        
-        return {"hypothesis_id": hypothesis_id}, 201
-    
+        return {"hypothesis_id": hypothesis_id}, 202
+
          
     @token_required
     def delete(self, current_user_id):
