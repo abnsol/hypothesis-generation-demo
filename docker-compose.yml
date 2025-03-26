@@ -26,7 +26,7 @@ services:
   flask-app:
     build: .
     ports:
-      - "5006:5000"
+      - "5008:5000"
     environment:
       - FLASK_ENV=development
       - PREFECT_API_URL=http://prefect-service:4200/api
@@ -49,7 +49,7 @@ services:
       context: .
       dockerfile: Dockerfile.prefect
     ports:
-      - "4201:4200"
+      - "4203:4200"
     volumes:
       - prefect-data:/root/.prefect
       - .:/app
@@ -57,7 +57,13 @@ services:
       - PREFECT_SERVER_API_HOST=0.0.0.0
       - PREFECT_SERVER_API_PORT=4200
       - PREFECT_API_URL=http://0.0.0.0:4200/api
+      - PREFECT_LOGGING_LEVEL=INFO
     command: prefect server start
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4200/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - app_network
 
@@ -67,11 +73,23 @@ services:
       dockerfile: Dockerfile.prefect
     volumes:
       - .:/app
+      - prefect-data:/root/.prefect
     environment:
       - PREFECT_API_URL=http://prefect-service:4200/api
-    command: prefect worker start -q enrichment-queue -p process
+      - PREFECT_LOGGING_LEVEL=INFO
+    command: >
+      sh -c "
+        echo 'Waiting for Prefect server...' &&
+        while ! curl -s http://prefect-service:4200/api/health > /dev/null; do
+          sleep 5
+        done &&
+        echo 'Prefect server is ready!' &&
+        prefect worker start -q enrichment-queue -p process --limit 5
+      "
     depends_on:
-      - prefect-service
+      prefect-service:
+        condition: service_healthy
+    restart: unless-stopped
     networks:
       - app_network
 

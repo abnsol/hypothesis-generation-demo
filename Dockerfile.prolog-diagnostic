@@ -1,0 +1,127 @@
+# Use Debian slim as the base image
+FROM debian:bookworm-slim
+
+# Install comprehensive diagnostic tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    wget \
+    curl \
+    git \
+    openssl \
+    libssl-dev \
+    ca-certificates \
+    libgmp-dev \
+    build-essential \
+    cmake \
+    ninja-build \
+    pkg-config \
+    libarchive-dev \
+    libpcre2-dev \
+    libreadline-dev \
+    zlib1g-dev \
+    python3 \
+    ca-certificates-java
+
+# Set environment variables for comprehensive diagnostics
+ENV LANG C.UTF-8
+ENV DEBIAN_FRONTEND=noninteractive
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ENV OPENSSL_CONF=/etc/ssl/openssl.cnf
+
+# Verbose SSL and Certificate Debugging
+RUN set -eux; \
+    echo "Comprehensive SSL/TLS Diagnostic Information:" && \
+    echo "1. System CA Certificates:" && \
+    update-ca-certificates --verbose && \
+    echo "\n2. Available CA Certificates:" && \
+    ls -l /etc/ssl/certs/ | grep .pem | wc -l && \
+    echo "\n3. OpenSSL Version and Configuration:" && \
+    openssl version -a && \
+    echo "\n4. Checking SSL Connection to SWI-Prolog:" && \
+    openssl s_client -connect www.swi-prolog.org:443 -showcerts || true && \
+    echo "\n5. Curl Verbose Connection Test:" && \
+    curl -v https://www.swi-prolog.org/pack/query || true
+
+# Install specific SWI-Prolog version with debugging
+RUN set -eux; \
+    SWIPL_VER=9.3.20; \
+    SWIPL_CHECKSUM=81cae918f75778c285bbecfc2b17c7117b574238e00213043a1fa0022acc36d6; \
+    mkdir /tmp/src; \
+    cd /tmp/src; \
+    wget -q https://www.swi-prolog.org/download/devel/src/swipl-$SWIPL_VER.tar.gz; \
+    echo "$SWIPL_CHECKSUM  swipl-$SWIPL_VER.tar.gz" >> swipl-$SWIPL_VER.tar.gz-CHECKSUM; \
+    sha256sum -c swipl-$SWIPL_VER.tar.gz-CHECKSUM; \
+    tar -xzf swipl-$SWIPL_VER.tar.gz; \
+    mkdir swipl-$SWIPL_VER/build; \
+    cd swipl-$SWIPL_VER/build; \
+    cmake -DCMAKE_BUILD_TYPE=Debug \
+          -DSWIPL_PACKAGES_X=OFF \
+          -DSWIPL_PACKAGES_JAVA=OFF \
+          -DCMAKE_INSTALL_PREFIX=/usr \
+          -G Ninja \
+          ..; \
+    ninja; \
+    ninja install
+
+# Create a detailed Prolog diagnostic script
+RUN printf ':- module(http_test, [test_http_connection/0]).\n\n:- use_module(library(http/http_client)).\n:- use_module(library(http/http_open)).\n\nlog_error(Error) :-\n    open("/tmp/ssl_error.log", append, Stream),\n    format(Stream, "Error Details: ~w~n", [Error]),\n    close(Stream).\n\ntest_http_connection :-\n    catch(\n        (   format("Attempting to connect to pack server...~n"),\n            http_get("https://www.swi-prolog.org/pack/query", Data, [\n                ssl_verify_certificate(true),\n                ssl_certificate_file("/etc/ssl/certs/ca-certificates.crt")\n            ]),\n            format("Connection successful. Response length: ~w~n", [length(Data)])\n        ),\n        Error,\n        (   format(user_error, "HTTP Connection Error: ~w~n", [Error]),\n            log_error(Error),\n            fail\n        )\n    ).\n\n:- initialization((\n    format("SWI-Prolog Version and SSL Diagnostics:~n"),\n    current_prolog_flag(version, Version),\n    current_prolog_flag(version_data, VersionData),\n    format("Version: ~w~nVersion Data: ~w~n", [Version, VersionData]),\n    format("Attempting HTTP Connection Test...~n"),\n    (   test_http_connection\n    ->  format("HTTP Test Completed Successfully~n")\n    ;   format(user_error, "HTTP Test Failed~n")\n    )\n), main).\n' > /tmp/http_test.pl
+
+# Create a comprehensive SSL debugging script
+RUN echo '#!/bin/bash\n\
+echo "Detailed SSL/TLS Connectivity Diagnostic Report"\n\
+echo "==================================="\n\
+\n\
+echo "1. System CA Certificates:"\n\
+update-ca-certificates --verbose\n\
+\n\
+echo "\n2. Certificate Count:"\n\
+ls -l /etc/ssl/certs/ | grep .pem | wc -l\n\
+\n\
+echo "\n3. OpenSSL Version:"\n\
+openssl version -a\n\
+\n\
+echo "\n4. Direct SSL Connection Test:"\n\
+openssl s_client -connect www.swi-prolog.org:443 -showcerts\n\
+\n\
+echo "\n5. Curl Verbose Connection Test:"\n\
+curl -v https://www.swi-prolog.org/pack/query\n\
+\n\
+echo "\n6. Prolog Error Log:"\n\
+cat /tmp/ssl_error.log 2>/dev/null || echo "No error log found."\n\
+' > /tmp/ssl_debug.sh && \
+    chmod +x /tmp/ssl_debug.sh
+
+# Check for proxy settings
+RUN echo "Checking for proxy settings:" && \
+    env | grep -i proxy && \
+    cat /etc/environment | grep -i proxy && \
+    cat /etc/profile | grep -i proxy && \
+    cat /etc/bash.bashrc | grep -i proxy
+
+# Check system time and date
+RUN echo "System time and date:" && \
+date && \
+timedatectl
+
+# Prolog SSL and Pack Installation Diagnostics
+RUN set -eux; \
+    echo "Prolog SSL and Pack Diagnostic Script:" && \
+    swipl /tmp/http_test.pl || true && \
+    /tmp/ssl_debug.sh && \
+    echo "Attempting Pack Installation:" && \
+    swipl -g "catch((\
+        format('Attempting to install interpolate pack...~n'),\
+        set_prolog_flag(ssl_certificate_file, '/etc/ssl/certs/ca-certificates.crt'),\
+        pack_install('interpolate', [\
+            interactive(false),\
+            upgrade(true),\
+            global(true),\
+            ssl_verify_certificate(true)\
+        ])\
+    ), Error, (\
+        format(user_error, 'Pack Installation Error: ~w~n', [Error]),\
+        fail\
+    ))" -t halt
+
+# Final Debugging Entrypoint
+CMD ["/bin/bash"]
