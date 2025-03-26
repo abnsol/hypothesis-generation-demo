@@ -38,8 +38,14 @@ def parse_arguments():
 def setup_api(args):
     load_dotenv()
     
-    # Set up Prefect deployment
-    work_queue_name = setup_prefect_deployment()
+    try:
+        work_queue_name = setup_prefect_deployment()
+        if work_queue_name is None:
+            logger.warning("Failed to set up Prefect deployment")
+    except Exception as e:
+        logger.error(f"Error in Prefect deployment setup: {e}")
+        work_queue_name = "enrichment-queue"  # fallback queue name
+    
     logger.info(f"Prefect deployment set up with work queue: {work_queue_name}")
     
     app = Flask(__name__)
