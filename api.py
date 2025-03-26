@@ -1,3 +1,5 @@
+from threading import Timer
+import uuid
 from prefect.utilities.asyncutils import sync_compatible
 from prefect.context import get_run_context
 from flask import Flask, json, request, jsonify
@@ -15,8 +17,41 @@ from prefect.task_runners import ConcurrentTaskRunner
 from utils import emit_task_update
 from loguru import logger
 from prefect.client import get_client
-from prefect.deployments import run_deployment
 import os
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
+async def run_enrichment_deployment(parameters, work_queue_name):
+    """
+    Asynchronously run a Prefect deployment
+    
+    :param parameters: Parameters to pass to the flow
+    :param work_queue_name: Name of the work queue
+    :return: Flow run object
+    """
+    try:
+        client = get_client()
+        
+        # Create a flow run directly with only serializable parameters
+        flow_run = await client.create_flow_run(
+            flow=async_enrichment_process,
+            parameters={
+                "current_user_id": parameters["current_user_id"],
+                "phenotype": parameters["phenotype"],
+                "variant": parameters["variant"],
+                "hypothesis_id": parameters["hypothesis_id"]
+            },
+            tags=["enrichment-process"]
+        )
+        
+        logger.info(f"Created flow run: {flow_run.id}")
+        return flow_run
+    
+    except Exception as e:
+        logger.error(f"Error running deployment: {e}")
+        raise
 
 class EnrichAPI(Resource):
     def __init__(self, enrichr, llm, prolog_query, db, work_queue_name):
@@ -43,65 +78,65 @@ class EnrichAPI(Resource):
 
     @token_required
     def post(self, current_user_id):
-        args = request.args
-        phenotype, variant = args['phenotype'], args['variant']
-
-        existing_hypothesis = self.db.get_hypothesis_by_phenotype_and_variant(current_user_id, phenotype, variant)
-
-        if existing_hypothesis:
-            # Run the flow using the existing deployment
-            flow_run = run_deployment(
-                name="enrichment-flow-deployment/enrichment-flow",
-                parameters={
-                    "enrichr": self.enrichr,
-                    "llm": self.llm,
-                    "prolog_query": self.prolog_query,
-                    "db": self.db,
-                    "current_user_id": current_user_id,
-                    "phenotype": phenotype,
-                    "variant": variant,
-                    "hypothesis_id": existing_hypothesis['id']
-                },
-                work_queue_name=self.work_queue_name
-            )
+        try:
+            args = request.args
+            phenotype, variant = args['phenotype'], args['variant']
+            existing_hypothesis = self.db.get_hypothesis_by_phenotype_and_variant(current_user_id, phenotype, variant)
             
-            return {"hypothesis_id": existing_hypothesis['id']}, 202
-        
-        # Generate hypothesis_id immediately
-        hypothesis_id = str(uuid4())
-
-        # Store initial hypothesis state
-        hypothesis_data = {
-            "id": hypothesis_id,
-            "phenotype": phenotype,
-            "variant": variant,
-            "status": "pending",
-            "created_at": datetime.now(timezone.utc).isoformat(timespec='milliseconds') + "Z",
-            "task_history": [],
-        }
-
-        # Save initial hypothesis state
-        self.db.create_hypothesis(hypothesis_data, current_user_id)
-
-        # Run the flow using the existing deployment
-        flow_run = run_deployment(
-            name="enrichment-flow-deployment/enrichment-flow",
-            parameters={
-                "enrichr": self.enrichr,
-                "llm": self.llm,
-                "prolog_query": self.prolog_query,
-                "db": self.db,
+            # Prepare only serializable parameters
+            deployment_params = {
                 "current_user_id": current_user_id,
                 "phenotype": phenotype,
-                "variant": variant,
-                "hypothesis_id": hypothesis_id
-            },
-            work_queue_name=self.work_queue_name
-        )
+                "variant": variant
+            }
+            
+            if existing_hypothesis:
+                # Use existing hypothesis
+                deployment_params["hypothesis_id"] = existing_hypothesis['id']
+                hypothesis_id = existing_hypothesis['id']
+            else:
+                # Generate hypothesis_id immediately
+                hypothesis_id = str(uuid.uuid4())
+                # Store initial hypothesis state
+                hypothesis_data = {
+                    "id": hypothesis_id,
+                    "phenotype": phenotype,
+                    "variant": variant,
+                    "status": "pending",
+                    "created_at": datetime.now(timezone.utc).isoformat(timespec='milliseconds') + "Z",
+                    "task_history": [],
+                }
+                # Save initial hypothesis state
+                self.db.create_hypothesis(hypothesis_data, current_user_id)
+                deployment_params["hypothesis_id"] = hypothesis_id
+            
+            # Create and run the async task
+            async def run_flow():
+                try:
+                    print("Running flow...")
+                    flow_run = await run_enrichment_deployment(
+                        parameters=deployment_params,
+                        work_queue_name=self.work_queue_name
+                    )
+                    logger.info(f"Flow run created with ID: {flow_run.id}")
+                except Exception as e:
+                    logger.error(f"Failed to create flow run: {e}")
+                    # Update hypothesis status to failed
+                    self.db.update_hypothesis(hypothesis_id, {
+                        "status": "failed",
+                        "error": str(e),
+                        "updated_at": datetime.now(timezone.utc).isoformat(timespec='milliseconds') + "Z",
+                    })
+                    raise
+        
+            # Run the async function
+            asyncio.run(run_flow())
+            return {"hypothesis_id": hypothesis_id}, 202
+            
+        except Exception as e:
+            logger.error(f"Error in post request: {e}")
+            return {"error": str(e)}, 500
 
-        return {"hypothesis_id": hypothesis_id}, 202
-
-         
     @token_required
     def delete(self, current_user_id):
         enrich_id = request.args.get('id')

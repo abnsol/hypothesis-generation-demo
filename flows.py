@@ -1,10 +1,13 @@
-from prefect import flow
+from prefect import flow, task
 from prefect.task_runners import ConcurrentTaskRunner
-from prefect.context import get_run_context
-import time
 from datetime import datetime, timezone
-from uuid import uuid4
 from loguru import logger
+from enrich import Enrich
+from llm import LLM
+from db import Database
+from query_swipl import PrologQuery
+import time
+from uuid import uuid4
 from utils import emit_task_update
 from status_tracker import TaskState
 from tasks import check_enrich, get_candidate_genes, predict_causal_gene, get_relevant_gene_proof, retry_predict_causal_gene, retry_get_relevant_gene_proof, create_enrich_data 
@@ -45,9 +48,24 @@ async def enrichment_flow(enrichr, llm, prolog_query, db, current_user_id, pheno
         raise
 
 @flow(name="async_enrichment_process", task_runner=ConcurrentTaskRunner())
-async def async_enrichment_process(enrichr, llm, prolog_query, db, current_user_id, phenotype, variant, hypothesis_id):
-    """Wrapper flow to run enrichment process"""
+async def async_enrichment_process(current_user_id: str, phenotype: str, variant: str, hypothesis_id: str):
+    """
+    Asynchronous enrichment process flow
+    """
     try:
+        # Initialize dependencies here instead of receiving them as parameters
+        enrichr = Enrich()
+        llm = LLM()
+        prolog_query = PrologQuery()
+        db = DB()
+        
+        # Update hypothesis status to running
+        db.update_hypothesis(hypothesis_id, {
+            "status": "running",
+            "updated_at": datetime.now(timezone.utc).isoformat(timespec='milliseconds') + "Z",
+        })
+        
+        # Run enrichment flow
         flow_result = await enrichment_flow(
             enrichr=enrichr,
             llm=llm,

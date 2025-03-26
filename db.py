@@ -26,7 +26,7 @@ class Database:
             return {'message': 'Logged in successfully', 'user_id': str(user['_id'])}, 200
         return {'message': 'Invalid credentials'}, 401
 
-    def create_hypothesis(self, user_id, data):
+    def create_hypothesis(self, data, user_id):
         data['user_id'] = user_id
         result = self.hypothesis_collection.insert_one(data)
         return {'message': 'Hypothesis created', 'id': str(result.inserted_id)}, 201
