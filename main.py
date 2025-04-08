@@ -6,6 +6,7 @@ from flask import Flask, json
 from flask_restful import Resource, Api
 from flask_socketio import SocketIO
 from loguru import logger
+from logging_config import setup_logging
 
 from enrich import Enrich
 # from semantic_search import SemanticSearch
@@ -99,6 +100,7 @@ def setup_api(args):
 
 
 def main():
+    setup_logging()
     args = parse_arguments()
     app, socketio = setup_api(args)
 

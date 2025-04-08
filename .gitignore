@@ -185,3 +185,7 @@ fabric.properties
 .idea/
 
 .vscode/
+
+#logs
+/logs
+*.log
