@@ -323,7 +323,7 @@ def finemapping_analysis_flow(current_user_id, selected_genes):
         selected_genes: A list of gene types to analyze
         
     Returns:
-        A dictionary of credible sets for each gene type
+        A dictionary of formatted credible sets for each gene type ready for LocusZoom
     """
     # Retrieve saved state from the first flow
     state = get_analysis_state(current_user_id)
@@ -331,7 +331,7 @@ def finemapping_analysis_flow(current_user_id, selected_genes):
     grouped_cojo_results = state["grouped_cojo_results"]
     OUTPUT_DIR = state["output_dir"]
     
-    # Dictionary to store results for each gene type
+    # Dictionary to store formatted results for each gene type
     all_results = {}
     
     # Process each gene type
@@ -391,8 +391,27 @@ def finemapping_analysis_flow(current_user_id, selected_genes):
         print("Formatting credible sets")
         credible_sets = formattating_credible_sets(filtered_snp, fit, R_df)
         
-        # Store results for this gene type
-        all_results[selected_gene] = credible_sets.to_dict(orient="records")
+        # Format for LocusZoom
+        credible_sets["log_pvalue"] = -np.log10(credible_sets["P"])
+        
+        # Create JSON structure for LocusZoom
+        locus_zoom_data = {
+            "data": {
+                "beta": credible_sets["beta"].tolist(),
+                "chromosome": credible_sets["CHR"].tolist(),
+                "log_pvalue": credible_sets["log_pvalue"].tolist(),
+                "position": credible_sets["POS"].tolist(),
+                "ref_allele": credible_sets["minor_allele"].tolist(),
+                "ref_allele_freq": credible_sets["minor_AF"].tolist(),
+                "variant": credible_sets["SNPID"].tolist(),
+                "posterior_prob": credible_sets["pip"].tolist(),
+                "is_member": (credible_sets["cs"] != 0).tolist()
+            },
+            "lastPage": None
+        }
+        
+        # Store only the formatted results for this gene type
+        all_results[selected_gene] = locus_zoom_data
     
     return all_results
 

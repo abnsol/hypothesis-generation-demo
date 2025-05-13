@@ -574,7 +574,7 @@ class AnalysisFinemappingAPI(Resource):
                 }
             Returns:
                 - susie_result: A dictionary where keys are gene types and values are 
-                  lists of credible sets for each gene type
+                  JSON objects formatted for LocusZoom visualization
     """
     def __init__(self, db):
         self.db = db
