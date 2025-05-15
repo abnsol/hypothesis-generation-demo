@@ -16,6 +16,7 @@ from prefect import flow
 from prefect.task_runners import ConcurrentTaskRunner
 from utils import emit_task_update
 from loguru import logger
+from summary import process_summary
 
 class EnrichAPI(Resource):
     def __init__(self, enrichr, llm, prolog_query, db):

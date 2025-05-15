@@ -186,16 +186,22 @@ fabric.properties
 
 .vscode/
 
-# Data
-data/projects/
-data/susie/
-data/uploads
-data/metadata
-data/states
-data/1000Genomes_phase3
-data/raw
-.prefect/
-
 
 # logs
+logs/
+
+
+# Data
+data/susie
+data/uploads
+data/metadata
+data/projects
+data/states
+data/external_data
+data/1000Genomes_phase3
+data/raw
+
+# Scripts
+
+# Logs
 logs/
