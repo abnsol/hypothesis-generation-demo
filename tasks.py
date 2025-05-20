@@ -641,7 +641,7 @@ def load_gwas_data(file_path):
         if file_size < 50 * 1024 * 1024:  # < 50MB
             print(f"[GWAS] Small file detected, reading all at once")
             if is_gzipped:
-                with gzip.open(file_path, 'rt') as f:
+    with gzip.open(file_path, 'rt') as f:
                     df = pd.read_csv(f, sep='\t')
                     print(f"[GWAS] Loaded {len(df)} rows from gzipped file")
                     return df
@@ -739,10 +739,10 @@ def preprocess_gwas_data(gwas_data_df):
             # Convert POS to integer - use pd.to_numeric with downcast for memory efficiency
             print(f"[GWAS] Converting POS to integer values")
             gwas_data_df['POS'] = pd.to_numeric(gwas_data_df['POS'], errors='coerce', downcast='integer')
-            
-            # Rename columns
+    
+    # Rename columns
             print(f"[GWAS] Renaming columns")
-            gwas_data_df = gwas_data_df.rename(columns={'variant': 'SNPID', 'pval': 'P'})
+    gwas_data_df = gwas_data_df.rename(columns={'variant': 'SNPID', 'pval': 'P'})
         else:
             # Handle case where columns might have different naming
             print("[GWAS] Warning: 'variant' column not found in GWAS data. Assuming data is already preprocessed.")
@@ -752,8 +752,8 @@ def preprocess_gwas_data(gwas_data_df):
         elapsed_time = (datetime.now() - start_time).total_seconds()
         print(f"[GWAS] Preprocessing completed in {elapsed_time:.2f} seconds")
         print(f"[GWAS] Preprocessed data shape: {gwas_data_df.shape}, memory usage: {memory_usage:.2f} MB")
-            
-        return gwas_data_df
+    
+    return gwas_data_df
     
     except Exception as e:
         print(f"[GWAS] Error preprocessing GWAS data: {str(e)}")
@@ -784,12 +784,12 @@ def filter_significant_snps(gwas_data_df, output_dir, maf_threshold=0.05, p_thre
     x_snps_count = significant_snp_df['SNPID'].str.startswith('X:').sum()
     significant_snp_df = significant_snp_df[~significant_snp_df['SNPID'].str.startswith('X:')]
     print(f"[GWAS] Removed {x_snps_count} X chromosome SNPs")
-    
+
     print(f"[GWAS] Final significant SNPs count: {len(significant_snp_df)}")
     print(f"[GWAS] Saving significant SNPs to {output_path}")
 
     significant_snp_df.to_csv(output_path, index=False)
-    
+
     # Calculate summary statistics
     chromosomes = significant_snp_df['CHR'].value_counts().to_dict()
     chr_summary = ", ".join([f"Chr{k}: {v}" for k, v in sorted(chromosomes.items())])

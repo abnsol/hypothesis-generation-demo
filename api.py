@@ -313,7 +313,7 @@ class AnalysisAPI(Resource):
     def post(self, current_user_id):
         # Parse input parameters
         data = request.get_json()
-        population = data.get('population', 'EUR')  # Default to EUR if not provided
+        population = data.get('population', 'EUR')  # Defaults to EUR if not provided
         gwas_file_id = data.get('gwas_file_id')
         
         if not gwas_file_id:
