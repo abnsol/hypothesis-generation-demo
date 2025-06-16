@@ -257,19 +257,48 @@ class ChatAPI(Resource):
 
     @token_required
     def post(self, current_user_id):
-        query = request.form.get('query')
-        hypothesis_id = request.form.get('hypothesis_id')
+        try:
+            query = request.form.get('query')
+            hypothesis_id = request.form.get('hypothesis_id')
 
-        hypothesis = self.db.get_hypotheses(current_user_id, hypothesis_id)
-        print(f"Hypothesis: {hypothesis}")
-        
-        if not hypothesis:
-            return {"error": "Hypothesis not found or access denied"}, 404
-        
-        graph = hypothesis.get('graph')
-        response = self.llm.chat(query, graph)
-        response = {"response": response}
-        return response
+            # Validate hypothesis_id is provided
+            if not hypothesis_id:
+                return {"error": "hypothesis_id is required"}, 400
+            
+            # Validate hypothesis_id format (basic UUID validation)
+            if not isinstance(hypothesis_id, str) or len(hypothesis_id.strip()) == 0:
+                return {"error": "Invalid hypothesis_id format"}, 400
+
+            # Fetch hypothesis data
+            hypothesis = self.db.get_hypotheses(current_user_id, hypothesis_id.strip())
+            print(f"Hypothesis: {hypothesis}")
+            
+            if not hypothesis:
+                return {"error": "Hypothesis not found or access denied"}, 404
+
+            # Case 1: Only hypothesis_id provided - return summary
+            if not query or query.strip() == "":
+                # Check if hypothesis has a summary
+                summary = hypothesis.get('summary')
+                if not summary:
+                    return {"error": "No summary available for this hypothesis"}, 404
+                
+                return {
+                    "hypothesis_id": hypothesis_id,
+                    "summary": summary
+                }, 200
+
+            # Case 2: Both query and hypothesis_id provided - chat with LLM
+            graph = hypothesis.get('graph')
+            if not graph:
+                return {"error": "No graph data available for this hypothesis to chat with"}, 404
+                
+            response = self.llm.chat(query.strip(), graph)
+            return {"response": response}, 200
+            
+        except Exception as e:
+            logger.error(f"Error in ChatAPI: {str(e)}")
+            return {"error": "Internal server error occurred"}, 500
 
 def init_socket_handlers(db_instance):
     logger.info("Initializing socket handlers...")
