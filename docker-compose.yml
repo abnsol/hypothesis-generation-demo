@@ -4,7 +4,7 @@ services:
   mongo:
     image: mongo:latest
     ports:
-      - "27015:27017"
+      - "27014:27017"
     volumes:
       - mongo-data:/data/db
     networks:
@@ -15,18 +15,18 @@ services:
       context: .
       dockerfile: Dockerfile.prolog
     ports:
-      - "4244:4242"
+      - "4241:4242"
     volumes:
       - ./pl:/app/pl
-      - /mnt/hdd_2/abdu/prolog_out_v2:/mnt/prolog_out_v2
-      - /mnt/hdd_2/abdu/prolog_out_v3:/mnt/prolog_out_v3
+      - /mnt/hdd_1/tesnim/version1/prolog_out_v2:/mnt/prolog_out_v2
+      - /mnt/hdd_1/tesnim/version1/prolog_out_v3:/mnt/prolog_out_v3
     networks:
       - app_network
 
   flask-app:
     build: .
     ports:
-      - "5007:5000"
+      - "5008:5000"
     environment:
       - FLASK_ENV=development
     volumes:
@@ -48,7 +48,7 @@ services:
       context: .
       dockerfile: Dockerfile.prefect
     ports:
-      - "4202:4200"
+      - "4201:4200"
     volumes:
       - prefect-data:/root/.prefect 
     environment:

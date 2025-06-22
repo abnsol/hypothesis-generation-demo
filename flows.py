@@ -21,13 +21,13 @@ async def enrichment_flow(enrichr, llm, prolog_query, db, current_user_id, pheno
             return {"id": enrich.get('id')}, 200
 
         candidate_genes = get_candidate_genes(prolog_query, variant, hypothesis_id)
-        time.sleep(3)
+        # time.sleep(3)
         causal_gene = predict_causal_gene(llm, phenotype, candidate_genes, hypothesis_id)
-        time.sleep(3)
+        # time.sleep(3)
         causal_graph, proof = get_relevant_gene_proof(prolog_query, variant, causal_gene, hypothesis_id)
 
         # mock causal_graph
-        causal_graph = {'nodes': [{'id': 'rs1421085', 'type': 'snp'}, {'id': 'ensg00000177508', 'type': 'gene'}, {'id': 'rs1421085', 'type': 'snp'}, {'id': 'ensg00000177508', 'type': 'gene'}, {'id': 'rs1421085', 'type': 'snp'}, {'id': 'chr16_53741418_53785410_grch38', 'type': 'super_enhancer'}, {'id': 'chr16_53741418_53785410_grch38', 'type': 'super_enhancer'}, {'id': 'ensg00000140718', 'type': 'gene'}, {'id': 'rs1421085', 'type': 'snp'}, {'id': 'ensg00000125798', 'type': 'gene'}, {'id': 'ensg00000125798', 'type': 'gene'}, {'id': 'ensg00000177508', 'type': 'gene'}, {'id': 'ensg00000125798', 'type': 'gene'}, {'id': 'chr16_53744537_53744917_grch38', 'type': 'tfbs'}, {'id': 'chr16_53744537_53744917_grch38', 'type': 'tfbs'}, {'id': 'chr16_53741418_53785410_grch38', 'type': 'super_enhancer'}], 'edges': [{'source': 'rs1421085', 'target': 'ensg00000177508', 'label': 'eqtl_association'}, {'source': 'rs1421085', 'target': 'ensg00000177508', 'label': 'in_tad_with'}, {'source': 'rs1421085', 'target': 'chr16_53741418_53785410_grch38', 'label': 'in_regulatory_region'}, {'source': 'chr16_53741418_53785410_grch38', 'target': 'ensg00000140718', 'label': 'associated_with'}, {'source': 'rs1421085', 'target': 'ensg00000125798', 'label': 'alters_tfbs'}, {'source': 'ensg00000125798', 'target': 'ensg00000177508', 'label': 'regulates'}, {'source': 'ensg00000125798', 'target': 'chr16_53744537_53744917_grch38', 'label': 'binds_to'}, {'source': 'chr16_53744537_53744917_grch38', 'target': 'chr16_53741418_53785410_grch38', 'label': 'overlaps_with'}]}
+        # causal_graph = {'nodes': [{'id': 'rs1421085', 'type': 'snp'}, {'id': 'ensg00000177508', 'type': 'gene'}, {'id': 'rs1421085', 'type': 'snp'}, {'id': 'ensg00000177508', 'type': 'gene'}, {'id': 'rs1421085', 'type': 'snp'}, {'id': 'chr16_53741418_53785410_grch38', 'type': 'super_enhancer'}, {'id': 'chr16_53741418_53785410_grch38', 'type': 'super_enhancer'}, {'id': 'ensg00000140718', 'type': 'gene'}, {'id': 'rs1421085', 'type': 'snp'}, {'id': 'ensg00000125798', 'type': 'gene'}, {'id': 'ensg00000125798', 'type': 'gene'}, {'id': 'ensg00000177508', 'type': 'gene'}, {'id': 'ensg00000125798', 'type': 'gene'}, {'id': 'chr16_53744537_53744917_grch38', 'type': 'tfbs'}, {'id': 'chr16_53744537_53744917_grch38', 'type': 'tfbs'}, {'id': 'chr16_53741418_53785410_grch38', 'type': 'super_enhancer'}], 'edges': [{'source': 'rs1421085', 'target': 'ensg00000177508', 'label': 'eqtl_association'}, {'source': 'rs1421085', 'target': 'ensg00000177508', 'label': 'in_tad_with'}, {'source': 'rs1421085', 'target': 'chr16_53741418_53785410_grch38', 'label': 'in_regulatory_region'}, {'source': 'chr16_53741418_53785410_grch38', 'target': 'ensg00000140718', 'label': 'associated_with'}, {'source': 'rs1421085', 'target': 'ensg00000125798', 'label': 'alters_tfbs'}, {'source': 'ensg00000125798', 'target': 'ensg00000177508', 'label': 'regulates'}, {'source': 'ensg00000125798', 'target': 'chr16_53744537_53744917_grch38', 'label': 'binds_to'}, {'source': 'chr16_53744537_53744917_grch38', 'target': 'chr16_53741418_53785410_grch38', 'label': 'overlaps_with'}]}
 
         if causal_graph is None:
             causal_gene = retry_predict_causal_gene(llm, phenotype, candidate_genes, proof, causal_gene, hypothesis_id)
@@ -69,12 +69,12 @@ def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, db, prolog
 
     print(f"Enrich data: {enrich_data}")
 
-    # causal_gene_id = get_gene_ids(prolog_query, [causal_gene.lower()], hypothesis_id)[0]
-    time.sleep(3)
-    causal_gene_id = get_gene_ids(1, hypothesis_id)[0]
-    time.sleep(3)
-    coexpressed_gene_ids = get_gene_ids(2, hypothesis_id)
-    # coexpressed_gene_ids = get_gene_ids(prolog_query, [g.lower() for g in coexpressed_gene_names], hypothesis_id)
+    causal_gene_id = get_gene_ids(prolog_query, [causal_gene.lower()], hypothesis_id)[0]
+    # time.sleep(3)
+    # causal_gene_id = get_gene_ids(1, hypothesis_id)[0]
+    # time.sleep(3)
+    # coexpressed_gene_ids = get_gene_ids(2, hypothesis_id)
+    coexpressed_gene_ids = get_gene_ids(prolog_query, [g.lower() for g in coexpressed_gene_names], hypothesis_id)
 
     nodes, edges = causal_graph["nodes"], causal_graph["edges"]
 
@@ -93,7 +93,7 @@ def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, db, prolog
     variant_entities = [f"snp({id})" for id in variant_rsids]
     query = f"maplist(variant_id, {variant_entities}, X)".replace("'", "")
 
-    time.sleep(3)
+    # time.sleep(3)
     variant_ids = execute_variant_query(prolog_query, query, hypothesis_id)
     for variant_id, rsid, node in zip(variant_ids, variant_rsids, variant_nodes):
         variant_id = variant_id.replace("'", "")
@@ -107,7 +107,7 @@ def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, db, prolog
             edge["target"] = variant_id
             
     nodes.append({"id": go_id, "type": "go", "name": go_name})
-    time.sleep(3)
+    # time.sleep(3)
     phenotype_id = execute_phenotype_query(prolog_query, phenotype, hypothesis_id)
 
     nodes.append({"id": phenotype_id, "type": "phenotype", "name": phenotype})
