@@ -5,6 +5,7 @@ from socketio_instance import socketio
 from enum import Enum
 from status_tracker import status_tracker, TaskState
 from utils import emit_task_update
+from loguru import logger
 
 ### Enrich Tasks
 @task(retries=2, cache_policy=None)
@@ -27,7 +28,7 @@ def check_enrich(db, current_user_id, phenotype, variant, hypothesis_id):
                 task_name="Verifying existence of enrichment data",
                 state=TaskState.COMPLETED,
                 progress=80,
-                details={"found": True, "enrich": enrich}
+                details={"found": True, "enrich_id": enrich["id"]}
             )
             return enrich
             
@@ -60,9 +61,18 @@ def get_candidate_genes(prolog_query, variant, hypothesis_id):
         )
 
         print("Executing: get candidate genes")
-        # result = prolog_query.get_candidate_genes(variant)
-        # mock
-        result = ['MMP2', 'RPGRIP1L', 'FTO', 'IRX6', 'IRX5', 'IRX3']
+        result = prolog_query.get_candidate_genes(variant)
+        
+        # Check if any candidate genes were found
+        if not result:
+            error_msg = f"No candidate genes found for variant {variant}. This variant may not be in the knowledge base."
+            emit_task_update(
+                hypothesis_id=hypothesis_id,
+                task_name="Getting candidate genes",
+                state=TaskState.FAILED,
+                error=error_msg
+            )
+            raise ValueError(error_msg)
 
         emit_task_update(
             hypothesis_id=hypothesis_id,
@@ -120,9 +130,12 @@ def get_relevant_gene_proof(prolog_query, variant, causal_gene, hypothesis_id):
         )
 
         print("Executing: get relevant gene proof")
-        # result = prolog_query.get_relevant_gene_proof(variant, causal_gene)
-        # mock
-        result = (None, 'user:relevant_gene(A,B):-eqtl_association(B,A),in_tad_with(B,A),in_regulatory_region(B,C),associated_with(C,D),alters_tfbs(B,E,A),regulates(E,A),binds_to(E,F),overlaps_with(F,C),hideme([!])')
+        result = prolog_query.get_relevant_gene_proof(variant, causal_gene)
+        
+        # Log the result for debugging
+        if result[0] is None:
+            logger.warning(f"Initial gene proof query failed for variant {variant} and gene {causal_gene}. Reason: {result[1]}. Will attempt retry.")
+        
         emit_task_update(
             hypothesis_id=hypothesis_id,
             task_name="Getting relevant gene proof",
@@ -180,10 +193,18 @@ def retry_get_relevant_gene_proof(prolog_query, variant, causal_gene, hypothesis
         )
 
         print("Retrying get relevant gene proof")
-        # result = prolog_query.get_relevant_gene_proof(variant, causal_gene)
-        # mock
-        result = (None, 'user:relevant_gene(A,B):-eqtl_association(B,A),in_tad_with(B,A),in_regulatory_region(B,C),associated_with(C,D),alters_tfbs(B,E,A),regulates(E,A),binds_to(E,F),overlaps_with(F,C),hideme([!])')
-
+        result = prolog_query.get_relevant_gene_proof(variant, causal_gene)
+        
+        # Check if the retry still failed
+        if result[0] is None:  # result is (causal_graph, proof)
+            error_msg = f"Retry failed: Unable to generate causal graph for variant {variant} and gene {causal_gene}. Reason: {result[1]}"
+            emit_task_update(
+                hypothesis_id=hypothesis_id,
+                task_name="Retrying to get relevant gene proof",
+                state=TaskState.FAILED,
+                error=error_msg
+            )
+            raise ValueError(error_msg)
        
         emit_task_update(
             hypothesis_id=hypothesis_id,
@@ -265,7 +286,7 @@ def check_hypothesis(db, current_user_id, enrich_id, go_id, hypothesis_id):
                 task_name="Verifying existence of hypothesis data",
                 state=TaskState.COMPLETED,
                 progress=100,
-                details={"found": True, "hypothesis": hypothesis}
+                details={"found": True}
             )
             return hypothesis
         
@@ -316,8 +337,7 @@ def get_enrich(db, current_user_id, enrich_id, hypothesis_id):
         raise
 
 @task(retries=2)
-# def get_gene_ids(prolog_query, gene_names, hypothesis_id):
-def get_gene_ids(name, hypothesis_id):
+def get_gene_ids(prolog_query, gene_names, hypothesis_id):
     try:
         emit_task_update(
             hypothesis_id=hypothesis_id,
@@ -326,13 +346,30 @@ def get_gene_ids(name, hypothesis_id):
             next_task="Querying gene data"
         )
         print("Fetching gene IDs...")
-        if name == 1:
-            result = ['ensg00000140718']
-        elif name == 2:
-            result = ['ensg00000143799', 'ensg00000176485', 'ensg00000132170']
-
         
-        # result = prolog_query.get_gene_ids(gene_names)
+        result = prolog_query.get_gene_ids(gene_names)
+        
+        # Check if any gene IDs were found
+        if not result:
+            error_msg = f"No gene IDs found for genes: {gene_names}. These genes may not be in the knowledge base."
+            emit_task_update(
+                hypothesis_id=hypothesis_id,
+                task_name="Getting gene data",
+                state=TaskState.FAILED,
+                error=error_msg
+            )
+            raise ValueError(error_msg)
+        
+        # Check for None values in the result
+        if any(gene_id is None for gene_id in result):
+            error_msg = f"Some gene IDs are missing for genes: {gene_names}. Incomplete data in knowledge base."
+            emit_task_update(
+                hypothesis_id=hypothesis_id,
+                task_name="Getting gene data",
+                state=TaskState.FAILED,
+                error=error_msg
+            )
+            raise ValueError(error_msg)
 
         emit_task_update(
             hypothesis_id=hypothesis_id,
@@ -361,9 +398,18 @@ def execute_gene_query(prolog_query, query, hypothesis_id):
         )
 
         print("Executing Prolog query to retrieve gene names...")
-        # result = prolog_query.execute_query(query)
-        # mock
-        result = ['irx3', 'irx3', 'fto', 'foxa2', 'foxa2', 'irx3', 'foxa2']
+        result = prolog_query.execute_query(query)
+        
+        # Check if the query returned None (failed)
+        if result is None:
+            error_msg = f"Gene query failed: {query}. Gene data may not be available in knowledge base."
+            emit_task_update(
+                hypothesis_id=hypothesis_id,
+                task_name="Querying gene data",
+                state=TaskState.FAILED,
+                error=error_msg
+            )
+            raise ValueError(error_msg)
 
         emit_task_update(
             hypothesis_id=hypothesis_id,
@@ -391,9 +437,18 @@ def execute_variant_query(prolog_query, query, hypothesis_id):
             next_task="Querying phenotype data"
         )
         print("Executing Prolog query to retrieve variant ids...")
-        # result = prolog_query.execute_query(query)
-        # mock
-        result = ["chr16:53767042-53767042-'T'>'C'", "chr16:53767042-53767042-'T'>'C'", "chr16:53767042-53767042-'T'>'C'", "chr16:53767042-53767042-'T'>'C'"]
+        result = prolog_query.execute_query(query)
+        
+        # Check if the query returned None (failed)
+        if result is None:
+            error_msg = f"Variant query failed: {query}. Variant data may not be available in knowledge base."
+            emit_task_update(
+                hypothesis_id=hypothesis_id,
+                task_name="Querying variant data",
+                state=TaskState.FAILED,
+                error=error_msg
+            )
+            raise ValueError(error_msg)
 
         emit_task_update(
             hypothesis_id=hypothesis_id,
@@ -421,9 +476,18 @@ def execute_phenotype_query(prolog_query, phenotype, hypothesis_id):
             next_task="Generating graph summary"
         )
         print("Executing Prolog query to retrieve phenotype id...")
-        # result = prolog_query.execute_query(f"term_name(efo(X), {phenotype})")
-        # mock
-        result = 'go_1902418'
+        result = prolog_query.execute_query(f"term_name(efo(X), {phenotype})")
+        
+        # Check if the query returned None (failed)
+        if result is None:
+            error_msg = f"Phenotype query failed for: {phenotype}. Phenotype may not be available in knowledge base."
+            emit_task_update(
+                hypothesis_id=hypothesis_id,
+                task_name="Querying phenotype data",
+                state=TaskState.FAILED,
+                error=error_msg
+            )
+            raise ValueError(error_msg)
 
         emit_task_update(
             hypothesis_id=hypothesis_id,
@@ -457,8 +521,7 @@ def summarize_graph(llm, causal_graph, hypothesis_id):
         emit_task_update(
             hypothesis_id=hypothesis_id,
             task_name="Generating graph summary",
-            state=TaskState.COMPLETED,
-            details={"summarize_graph": result}
+            state=TaskState.COMPLETED
         )
         return result
     except Exception as e:
@@ -484,14 +547,12 @@ def create_hypothesis(db, enrich_id, go_id, variant_id, phenotype, causal_gene, 
         hypothesis_data = {
                 "enrich_id": enrich_id,
                 "go_id": go_id,
-                "variant": variant_id,
                 "phenotype": phenotype,
                 "causal_gene": causal_gene,
                 "graph": causal_graph,
                 "summary": summary,
                 "biological_context": "",
-                "status": "completed",
-                "task_history": hypothesis_history,
+                "status": "completed"
             }
         db.update_hypothesis(hypothesis_id, hypothesis_data)
 
@@ -501,7 +562,8 @@ def create_hypothesis(db, enrich_id, go_id, variant_id, phenotype, causal_gene, 
             state=TaskState.COMPLETED,
             details={
                 "status": "completed",
-                "result": hypothesis_data  # Include the complete result
+                "hypothesis_id": hypothesis_id, 
+                "go_id": go_id
             }
         )
         hypothesis_history = status_tracker.get_history(hypothesis_id)

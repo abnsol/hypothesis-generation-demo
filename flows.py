@@ -21,19 +21,20 @@ async def enrichment_flow(enrichr, llm, prolog_query, db, current_user_id, pheno
             return {"id": enrich.get('id')}, 200
 
         candidate_genes = get_candidate_genes(prolog_query, variant, hypothesis_id)
-        time.sleep(3)
         causal_gene = predict_causal_gene(llm, phenotype, candidate_genes, hypothesis_id)
-        time.sleep(3)
         causal_graph, proof = get_relevant_gene_proof(prolog_query, variant, causal_gene, hypothesis_id)
-
-        # mock causal_graph
-        causal_graph = {'nodes': [{'id': 'rs1421085', 'type': 'snp'}, {'id': 'ensg00000177508', 'type': 'gene'}, {'id': 'rs1421085', 'type': 'snp'}, {'id': 'ensg00000177508', 'type': 'gene'}, {'id': 'rs1421085', 'type': 'snp'}, {'id': 'chr16_53741418_53785410_grch38', 'type': 'super_enhancer'}, {'id': 'chr16_53741418_53785410_grch38', 'type': 'super_enhancer'}, {'id': 'ensg00000140718', 'type': 'gene'}, {'id': 'rs1421085', 'type': 'snp'}, {'id': 'ensg00000125798', 'type': 'gene'}, {'id': 'ensg00000125798', 'type': 'gene'}, {'id': 'ensg00000177508', 'type': 'gene'}, {'id': 'ensg00000125798', 'type': 'gene'}, {'id': 'chr16_53744537_53744917_grch38', 'type': 'tfbs'}, {'id': 'chr16_53744537_53744917_grch38', 'type': 'tfbs'}, {'id': 'chr16_53741418_53785410_grch38', 'type': 'super_enhancer'}], 'edges': [{'source': 'rs1421085', 'target': 'ensg00000177508', 'label': 'eqtl_association'}, {'source': 'rs1421085', 'target': 'ensg00000177508', 'label': 'in_tad_with'}, {'source': 'rs1421085', 'target': 'chr16_53741418_53785410_grch38', 'label': 'in_regulatory_region'}, {'source': 'chr16_53741418_53785410_grch38', 'target': 'ensg00000140718', 'label': 'associated_with'}, {'source': 'rs1421085', 'target': 'ensg00000125798', 'label': 'alters_tfbs'}, {'source': 'ensg00000125798', 'target': 'ensg00000177508', 'label': 'regulates'}, {'source': 'ensg00000125798', 'target': 'chr16_53744537_53744917_grch38', 'label': 'binds_to'}, {'source': 'chr16_53744537_53744917_grch38', 'target': 'chr16_53741418_53785410_grch38', 'label': 'overlaps_with'}]}
 
         if causal_graph is None:
             causal_gene = retry_predict_causal_gene(llm, phenotype, candidate_genes, proof, causal_gene, hypothesis_id)
             causal_graph, proof = retry_get_relevant_gene_proof(prolog_query, variant, causal_gene, hypothesis_id)
             print("Retried causal gene: ", causal_gene)
             print("Retried causal graph: ", causal_graph)
+
+        # Final validation: ensure we have a valid causal graph
+        if causal_graph is None:
+            error_msg = f"Failed to generate causal graph for variant {variant} and gene {causal_gene}. This variant/gene combination may not be supported by the knowledge base."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
 
         enrich_tbl = enrichr.run(causal_gene)
         relevant_gos = llm.get_relevant_go(phenotype, enrich_tbl)
@@ -69,12 +70,18 @@ def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, db, prolog
 
     print(f"Enrich data: {enrich_data}")
 
-    # causal_gene_id = get_gene_ids(prolog_query, [causal_gene.lower()], hypothesis_id)[0]
-    time.sleep(3)
-    causal_gene_id = get_gene_ids(1, hypothesis_id)[0]
-    time.sleep(3)
-    coexpressed_gene_ids = get_gene_ids(2, hypothesis_id)
-    # coexpressed_gene_ids = get_gene_ids(prolog_query, [g.lower() for g in coexpressed_gene_names], hypothesis_id)
+    # Validate causal_graph before proceeding
+    if causal_graph is None:
+        logger.error(f"Causal graph is None for enrich_id {enrich_id}")
+        return {"message": "Causal graph data is missing. The enrichment may have failed to generate complete data."}, 500
+    
+    # Validate causal_graph structure
+    if not isinstance(causal_graph, dict) or "nodes" not in causal_graph or "edges" not in causal_graph:
+        logger.error(f"Invalid causal graph structure for enrich_id {enrich_id}: {causal_graph}")
+        return {"message": "Causal graph data is corrupted or incomplete."}, 500
+
+    causal_gene_id = get_gene_ids(prolog_query, [causal_gene.lower()], hypothesis_id)[0]
+    coexpressed_gene_ids = get_gene_ids(prolog_query, [g.lower() for g in coexpressed_gene_names], hypothesis_id)
 
     nodes, edges = causal_graph["nodes"], causal_graph["edges"]
 
@@ -84,6 +91,22 @@ def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, db, prolog
     query = f"maplist(gene_name, {gene_entities}, X)".replace("'", "")
 
     gene_names = execute_gene_query(prolog_query, query, hypothesis_id)
+    
+    # Validate gene_names result and handle missing data
+    if gene_names is None:
+        logger.error(f"Failed to retrieve gene names for gene entities: {gene_entities}")
+        return {"message": "Failed to retrieve gene information from knowledge base"}, 500
+    
+    # Ensure we have the same number of results
+    if len(gene_names) != len(gene_ids) or len(gene_names) != len(gene_nodes):
+        logger.error(f"Mismatch in gene data: gene_ids={len(gene_ids)}, gene_names={len(gene_names)}, gene_nodes={len(gene_nodes)}")
+        return {"message": "Incomplete gene data available for this variant"}, 500
+    
+    # Check for None values in gene_names
+    if any(name is None for name in gene_names):
+        logger.error(f"Some gene names are None: {gene_names}")
+        return {"message": "Some gene information is missing from knowledge base"}, 500
+    
     for id, name, node in zip(gene_ids, gene_names, gene_nodes):
         node["id"] = id
         node["name"] = name.upper()
@@ -93,8 +116,23 @@ def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, db, prolog
     variant_entities = [f"snp({id})" for id in variant_rsids]
     query = f"maplist(variant_id, {variant_entities}, X)".replace("'", "")
 
-    time.sleep(3)
     variant_ids = execute_variant_query(prolog_query, query, hypothesis_id)
+    
+    # Validate variant_ids result and handle missing data
+    if variant_ids is None:
+        logger.error(f"Failed to retrieve variant IDs for variant entities: {variant_entities}")
+        return {"message": "Failed to retrieve variant information from knowledge base"}, 500
+    
+    # Ensure we have the same number of results
+    if len(variant_ids) != len(variant_rsids) or len(variant_ids) != len(variant_nodes):
+        logger.error(f"Mismatch in variant data: variant_ids={len(variant_ids)}, variant_rsids={len(variant_rsids)}, variant_nodes={len(variant_nodes)}")
+        return {"message": "Incomplete variant data available for this variant"}, 500
+    
+    # Check for None values in variant_ids
+    if any(var_id is None for var_id in variant_ids):
+        logger.error(f"Some variant IDs are None: {variant_ids}")
+        return {"message": "Some variant information is missing from knowledge base"}, 500
+    
     for variant_id, rsid, node in zip(variant_ids, variant_rsids, variant_nodes):
         variant_id = variant_id.replace("'", "")
         node["id"] = variant_id
@@ -107,7 +145,6 @@ def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, db, prolog
             edge["target"] = variant_id
             
     nodes.append({"id": go_id, "type": "go", "name": go_name})
-    time.sleep(3)
     phenotype_id = execute_phenotype_query(prolog_query, phenotype, hypothesis_id)
 
     nodes.append({"id": phenotype_id, "type": "phenotype", "name": phenotype})
