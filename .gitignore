@@ -185,3 +185,13 @@ fabric.properties
 .idea/
 
 .vscode/
+
+# Data
+data/projects/
+data/susie/
+data/uploads
+data/metadata
+data/states
+
+# logs
+logs/
