@@ -311,7 +311,6 @@ def init_socket_handlers(db_instance):
     @socketio.on('connect')
     @socket_token_required
     def handle_connect(self, current_user_id):
-        logger.info("somehting else")
         logger.info(f"Client connected: {current_user_id}")
         client_id = request.sid
         inactivity_timer = Timer(300, lambda: socketio.close_room(client_id))
