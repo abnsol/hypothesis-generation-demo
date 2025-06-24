@@ -66,19 +66,46 @@ def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, db, prolog
     variant_id = enrich_data['variant']
     phenotype = enrich_data['phenotype']
     coexpressed_gene_names = go_term[0]["genes"]
-    causal_graph = enrich_data['causal_graph']
+    causal_graph = enrich_data.get('causal_graph')  # Use .get() to handle missing key
 
-    print(f"Enrich data: {enrich_data}")
+    print(f"Enrich data keys: {list(enrich_data.keys())}")
+    print(f"Causal graph type: {type(causal_graph)}")
+    
+    # Debug: Check if causal_graph key exists
+    if 'causal_graph' not in enrich_data:
+        error_msg = f"Causal graph field missing from enrichment data. Available fields: {list(enrich_data.keys())}"
+        logger.error(error_msg)
+        emit_task_update(
+            hypothesis_id=hypothesis_id,
+            task_name="Retrieving causal graph data",
+            state=TaskState.FAILED,
+            error=error_msg
+        )
+        return {"message": error_msg}, 500
 
     # Validate causal_graph before proceeding
     if causal_graph is None:
+        error_msg = "Causal graph data is missing. The enrichment may have failed to generate complete data."
         logger.error(f"Causal graph is None for enrich_id {enrich_id}")
-        return {"message": "Causal graph data is missing. The enrichment may have failed to generate complete data."}, 500
+        emit_task_update(
+            hypothesis_id=hypothesis_id,
+            task_name="Validating causal graph data",
+            state=TaskState.FAILED,
+            error=error_msg
+        )
+        return {"message": error_msg}, 500
     
     # Validate causal_graph structure
     if not isinstance(causal_graph, dict) or "nodes" not in causal_graph or "edges" not in causal_graph:
+        error_msg = "Causal graph data is corrupted or incomplete."
         logger.error(f"Invalid causal graph structure for enrich_id {enrich_id}: {causal_graph}")
-        return {"message": "Causal graph data is corrupted or incomplete."}, 500
+        emit_task_update(
+            hypothesis_id=hypothesis_id,
+            task_name="Validating causal graph structure",
+            state=TaskState.FAILED,
+            error=error_msg
+        )
+        return {"message": error_msg}, 500
 
     causal_gene_id = get_gene_ids(prolog_query, [causal_gene.lower()], hypothesis_id)[0]
     coexpressed_gene_ids = get_gene_ids(prolog_query, [g.lower() for g in coexpressed_gene_names], hypothesis_id)

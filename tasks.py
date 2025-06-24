@@ -250,12 +250,12 @@ def create_enrich_data(db, variant, phenotype, causal_gene, relevant_gos, causal
             details={"enrichment_id": enrich_data["id"]}
         )
         
-        hypothesis_history = status_tracker.get_history(hypothesis_id)
-        print("Updating hypothesis in the database...")
-        hypothesis_data = {
-                "task_history": hypothesis_history,
-            }
-        db.update_hypothesis(hypothesis_id, hypothesis_data)
+        # hypothesis_history = status_tracker.get_history(hypothesis_id)
+        # print("Updating hypothesis in the database...")
+        # hypothesis_data = {
+        #         "task_history": hypothesis_history,
+        #     }
+        # db.update_hypothesis(hypothesis_id, hypothesis_data)
 
         return enrich_data["id"]
     except Exception as e:
@@ -566,12 +566,12 @@ def create_hypothesis(db, enrich_id, go_id, variant_id, phenotype, causal_gene, 
                 "go_id": go_id
             }
         )
-        hypothesis_history = status_tracker.get_history(hypothesis_id)
-        print("Updating hypothesis in the database...")
-        hypothesis_data = {
-                "task_history": hypothesis_history,
-            }
-        db.update_hypothesis(hypothesis_id, hypothesis_data)
+        # hypothesis_history = status_tracker.get_history(hypothesis_id)
+        # print("Updating hypothesis in the database...")
+        # hypothesis_data = {
+        #         "task_history": hypothesis_history,
+        #     }
+        # db.update_hypothesis(hypothesis_id, hypothesis_data)
         
         return hypothesis_id
     except Exception as e:
