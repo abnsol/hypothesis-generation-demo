@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pymongo import MongoClient
 from werkzeug.security import generate_password_hash, check_password_hash
 from bson.objectid import ObjectId
@@ -12,6 +12,7 @@ class Database:
         self.enrich_collection = self.db['enrich']
         self.user_enrich_references = self.db['user_enrich_references']  # New collection for user-enrichment mapping
         self.task_updates_collection = self.db['task_updates'] 
+        self.graph_cache_collection = self.db['graph_cache']  # New collection for graph caching
 
     def create_user(self, email, password):
         if self.users_collection.find_one({'email': email}):
@@ -309,7 +310,105 @@ class Database:
         })
 
     def get_hypothesis_by_enrich(self, user_id, enrich_id):
-        return self.hypothesis_collection.find_one({
-            'user_id': user_id,
+        query = {
+            'enrich_id': enrich_id,
+            'user_id': user_id
+        }
+        hypothesis = self.hypothesis_collection.find_one(query)
+        if hypothesis:
+            hypothesis['_id'] = str(hypothesis['_id'])
+        return hypothesis
+
+    # Graph Cache Methods (Automatic - Internal Use Only)
+    def get_cached_graph(self, go_id, enrich_id):
+        """
+        Retrieve a cached graph for a specific GO ID and enrichment combination.
+        Returns the cached graph if it exists and is valid.
+        """
+        query = {
+            'go_id': go_id,
             'enrich_id': enrich_id
-        })
+        }
+        
+        cached_graph = self.graph_cache_collection.find_one(query)
+        if cached_graph:
+            cached_graph['_id'] = str(cached_graph['_id'])
+            # Check if cache is still valid (e.g., not expired)
+            if self._is_cache_valid(cached_graph):
+                # Update access statistics automatically
+                self._update_cache_access(go_id, enrich_id)
+                return cached_graph
+            else:
+                # Automatically remove expired entry
+                self.graph_cache_collection.delete_one(query)
+        
+        return None
+    
+    def cache_graph(self, go_id, enrich_id, graph_data, metadata=None):
+        """
+        Cache a graph for a specific GO ID and enrichment combination.
+        Called automatically when new graphs are generated.
+        """
+        cache_entry = {
+            'go_id': go_id,
+            'enrich_id': enrich_id,
+            'graph_data': graph_data,
+            'metadata': metadata or {},
+            'created_at': datetime.now(timezone.utc).isoformat(timespec='milliseconds') + "Z",
+            'last_accessed': datetime.now(timezone.utc).isoformat(timespec='milliseconds') + "Z",
+            'access_count': 1
+        }
+        
+        # Use upsert to either insert new or update existing
+        self.graph_cache_collection.update_one(
+            {'go_id': go_id, 'enrich_id': enrich_id},
+            {'$set': cache_entry},
+            upsert=True
+        )
+        
+        # Automatically clean up old entries periodically
+        self._cleanup_expired_cache_automatic()
+        
+        return cache_entry
+    
+    def _update_cache_access(self, go_id, enrich_id):
+        """
+        Internal method to update access statistics.
+        Called automatically on cache hits.
+        """
+        self.graph_cache_collection.update_one(
+            {'go_id': go_id, 'enrich_id': enrich_id},
+            {
+                '$set': {
+                    'last_accessed': datetime.now(timezone.utc).isoformat(timespec='milliseconds') + "Z"
+                },
+                '$inc': {'access_count': 1}
+            }
+        )
+    
+    def _cleanup_expired_cache_automatic(self):
+        """
+        Automatically clean up expired cache entries.
+        Only runs occasionally to avoid performance overhead.
+        """
+        import random
+        # Only run cleanup 1% of the time to avoid performance overhead
+        if random.random() < 0.01:
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=30)
+            cutoff_str = cutoff_date.isoformat(timespec='milliseconds') + "Z"
+            
+            self.graph_cache_collection.delete_many({
+                'created_at': {'$lt': cutoff_str}
+            })
+    
+    def _is_cache_valid(self, cached_graph):
+        """
+        Check if a cached graph is still valid.
+        Automatically called when retrieving cache entries.
+        """
+        try:
+            created_at = datetime.fromisoformat(cached_graph['created_at'].replace('Z', '+00:00'))
+            max_age = datetime.now(timezone.utc) - timedelta(days=30)
+            return created_at > max_age
+        except (KeyError, ValueError):
+            return False

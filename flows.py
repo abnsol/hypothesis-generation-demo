@@ -56,6 +56,32 @@ def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, db, prolog
         print("Retrieved hypothesis data from saved db")
         return {"summary": hypothesis.get('summary'), "graph": hypothesis.get('graph')}, 200
 
+    # Check for cached graph first
+    cached_graph = db.get_cached_graph(go_id, enrich_id)
+    if cached_graph:
+        logger.info(f"Cache HIT: Retrieved cached graph for GO ID {go_id} and enrichment {enrich_id}")
+        print(f"Retrieved cached graph for GO ID {go_id}")
+        
+        # Generate summary for the cached graph
+        summary = summarize_graph(llm, cached_graph['graph_data'], hypothesis_id)
+        
+        # Create hypothesis with cached graph
+        hypothesis_id = create_hypothesis(
+            db, enrich_id, go_id, 
+            cached_graph['metadata'].get('variant_id'), 
+            cached_graph['metadata'].get('phenotype'),
+            cached_graph['metadata'].get('causal_gene'),
+            cached_graph['graph_data'], 
+            summary, 
+            current_user_id, 
+            hypothesis_id
+        )
+        
+        return {"summary": summary, "graph": cached_graph['graph_data']}, 201
+
+    logger.info(f"Cache MISS: No cached graph found for GO ID {go_id} and enrichment {enrich_id}, generating new graph")
+    print(f"No cached graph found for GO ID {go_id}, generating new graph")
+
     enrich_data = get_enrich(db, current_user_id, enrich_id, hypothesis_id)
     if not enrich_data:
         return {"message": "Invalid enrich_id or access denied."}, 404
@@ -183,6 +209,18 @@ def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, db, prolog
 
 
     causal_graph = {"nodes": nodes, "edges": edges}
+
+    # Cache the generated graph
+    metadata = {
+        'variant_id': variant_id,
+        'phenotype': phenotype,
+        'causal_gene': causal_gene,
+        'go_name': go_name,
+        'coexpressed_genes': coexpressed_gene_names
+    }
+    db.cache_graph(go_id, enrich_id, causal_graph, metadata)
+    logger.info(f"Cache STORE: Cached new graph for GO ID {go_id} and enrichment {enrich_id}")
+    print(f"Cached graph for GO ID {go_id}")
 
     summary = summarize_graph(llm, causal_graph, hypothesis_id)
 
