@@ -10,6 +10,7 @@ class Database:
         self.users_collection = self.db['users']
         self.hypothesis_collection = self.db['hypotheses']
         self.enrich_collection = self.db['enrich']
+        self.user_enrich_references = self.db['user_enrich_references']  # New collection for user-enrichment mapping
         self.task_updates_collection = self.db['task_updates'] 
 
     def create_user(self, email, password):
@@ -32,9 +33,55 @@ class Database:
         return {'message': 'Hypothesis created', 'id': str(result.inserted_id)}, 201
     
     def create_enrich(self, user_id, data):
-        data['user_id'] = user_id
+        # Check if enrichment already exists globally (by phenotype and variant)
+        existing_enrich = self.get_global_enrich_by_phenotype_and_variant(
+            data['phenotype'], data['variant']
+        )
+        
+        if existing_enrich:
+            # Create user reference to existing enrichment
+            self.create_user_enrich_reference(user_id, existing_enrich['id'])
+            return {'message': 'Enrichment reference created', 'id': existing_enrich['id']}, 200
+        
+        # Create new global enrichment (without user_id)
         result = self.enrich_collection.insert_one(data)
-        return {'message': 'Enrichment created', 'id': str(result.inserted_id)}, 201
+        enrich_id = data['id']  # Use the id from data, not the MongoDB _id
+        
+        # Create user reference to the new enrichment
+        self.create_user_enrich_reference(user_id, enrich_id)
+        
+        return {'message': 'Enrichment created', 'id': enrich_id}, 201
+    
+    def create_user_enrich_reference(self, user_id, enrich_id):
+        """Create a reference between user and enrichment"""
+        reference_data = {
+            'user_id': user_id,
+            'enrich_id': enrich_id,
+            'created_at': datetime.now(timezone.utc).isoformat(timespec='milliseconds') + "Z"
+        }
+        
+        # Check if reference already exists
+        existing_ref = self.user_enrich_references.find_one({
+            'user_id': user_id,
+            'enrich_id': enrich_id
+        })
+        
+        if not existing_ref:
+            self.user_enrich_references.insert_one(reference_data)
+    
+    def get_global_enrich_by_phenotype_and_variant(self, phenotype, variant_id):
+        """Get enrichment globally by phenotype and variant (no user filter)"""
+        query = {
+            'phenotype': phenotype,
+            'variant': variant_id
+        }
+        
+        enrich = self.enrich_collection.find_one(query)
+        
+        if enrich:
+            enrich['_id'] = str(enrich['_id'])
+        
+        return enrich
 
     def get_hypotheses(self, user_id=None, hypothesis_id=None):
         query = {}
@@ -71,18 +118,25 @@ class Database:
         return hypothesis is not None
     
     def check_enrich(self, user_id=None, phenotype=None, variant_id=None):
-        query = {}
+        # Check if enrichment exists globally
+        global_enrich = self.get_global_enrich_by_phenotype_and_variant(phenotype, variant_id)
         
+        if not global_enrich:
+            return False
+        
+        # If user_id provided, check if user has access to this enrichment
         if user_id:
-            query['user_id'] = user_id
-        if phenotype:
-            query['phenotype'] = phenotype
-        if variant_id:
-            query['variant'] = variant_id
+            return self.user_has_enrich_access(user_id, global_enrich['id'])
         
-        enrich = self.enrich_collection.find_one(query)
-        
-        return enrich is not None
+        return True
+    
+    def user_has_enrich_access(self, user_id, enrich_id):
+        """Check if user has access to a specific enrichment"""
+        reference = self.user_enrich_references.find_one({
+            'user_id': user_id,
+            'enrich_id': enrich_id
+        })
+        return reference is not None
 
 
     def get_hypothesis_by_enrich_and_go(self, enrich_id, go_id, user_id=None):
@@ -98,38 +152,47 @@ class Database:
         return hypothesis
 
     def get_enrich_by_phenotype_and_variant(self, phenotype, variant_id, user_id=None):
-        query = {
-            'phenotype': phenotype,
-            'variant': variant_id,
-            'user_id': user_id
-        }
+        # Get enrichment globally first
+        enrich = self.get_global_enrich_by_phenotype_and_variant(phenotype, variant_id)
         
-        enrich = self.enrich_collection.find_one(query)
-        
-        if enrich:
-            enrich['_id'] = str(enrich['_id'])
+        # If user_id provided, verify user has access
+        if enrich and user_id:
+            if not self.user_has_enrich_access(user_id, enrich['id']):
+                return None
         
         return enrich
 
 
     def get_enrich(self, user_id=None, enrich_id=None):
-        query = {}
-        
-        if user_id:
-            query['user_id'] = user_id
         if enrich_id:
-            query['id'] = enrich_id
-            enrich = self.enrich_collection.find_one(query)  
+            # Get specific enrichment by ID
+            enrich = self.enrich_collection.find_one({'id': enrich_id})
             if enrich:
                 enrich['_id'] = str(enrich['_id'])
+                # If user_id provided, verify user has access
+                if user_id and not self.user_has_enrich_access(user_id, enrich_id):
+                    logger.info("User does not have access to the given enrich_id.")
+                    return None
             else:
-                print("No document found for the given enrich_id.")
+                logger.info("No document found for the given enrich_id.")
             return enrich
 
-        enriches = list(self.enrich_collection.find(query))
+        # Get all enrichments for a user
+        if user_id:
+            # Get all enrich_ids this user has access to
+            user_references = list(self.user_enrich_references.find({'user_id': user_id}))
+            enrich_ids = [ref['enrich_id'] for ref in user_references]
+            
+            # Get all enrichments for these IDs
+            enriches = list(self.enrich_collection.find({'id': {'$in': enrich_ids}}))
+            for enrich in enriches:
+                enrich['_id'] = str(enrich['_id'])
+            return enriches if enriches else []
+        
+        # Get all enrichments (no user filter)
+        enriches = list(self.enrich_collection.find({}))
         for enrich in enriches:
             enrich['_id'] = str(enrich['_id'])
-
         return enriches if enriches else []
 
     def delete_hypothesis(self, user_id, hypothesis_id):
@@ -175,9 +238,27 @@ class Database:
     
     
     def delete_enrich(self, user_id, enrich_id):
-        result = self.enrich_collection.delete_one({'id': enrich_id, 'user_id': user_id})
+        # Check if user has access to this enrichment
+        if not self.user_has_enrich_access(user_id, enrich_id):
+            return {'message': 'Enrich not found or not authorized'}, 404
+        
+        # Remove user reference to enrichment
+        result = self.user_enrich_references.delete_one({
+            'user_id': user_id,
+            'enrich_id': enrich_id
+        })
+        
         if result.deleted_count > 0:
-            return {'message': 'Enrich deleted'}, 200
+            # Check if any other users reference this enrichment
+            other_refs = self.user_enrich_references.find_one({'enrich_id': enrich_id})
+            
+            # If no other users reference it, delete the enrichment globally
+            if not other_refs:
+                self.enrich_collection.delete_one({'id': enrich_id})
+                return {'message': 'Enrich deleted globally'}, 200
+            
+            return {'message': 'Enrich reference removed'}, 200
+        
         return {'message': 'Enrich not found or not authorized'}, 404
     
 

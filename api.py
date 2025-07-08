@@ -29,13 +29,17 @@ class EnrichAPI(Resource):
         # Get the enrich_id from the query parameters
         enrich_id = request.args.get('id')
         if enrich_id:
-            # Fetch a specific enrich by enrich_id and user_id
+            # Check user access first
+            if not self.db.user_has_enrich_access(current_user_id, enrich_id):
+                return {"message": "Enrich not found or access denied."}, 404
+            
+            # Fetch a specific enrich by enrich_id
             enrich = self.db.get_enrich(current_user_id, enrich_id)
             if not enrich:
                 return {"message": "Enrich not found or access denied."}, 404
             return enrich, 200
           
-        # Fetch all hypotheses for the current user
+        # Fetch all enrichments for the current user
         enrich = self.db.get_enrich(user_id=current_user_id)
         return enrich, 200
 
@@ -127,19 +131,23 @@ class HypothesisAPI(Resource):
 
             if is_complete:
                 enrich_id = hypothesis.get('enrich_id')
-                enrich_data = self.db.get_enrich(current_user_id, enrich_id)
-                # Remove 'causal_graph' field from enrich_data if it exists
-                if isinstance(enrich_data, dict):
-                    enrich_data.pop('causal_graph', None)
-                return {
-                    'id': hypothesis_id,
-                    'variant': hypothesis.get('variant') or hypothesis.get('variant_id'),
-                    'enrich_id': enrich_id,
-                    'phenotype': hypothesis['phenotype'],
-                    "status": "completed",
-                    "created_at": hypothesis.get('created_at'),
-                    "result": enrich_data
-                }, 200
+                # Check user access to enrichment
+                if self.db.user_has_enrich_access(current_user_id, enrich_id):
+                    enrich_data = self.db.get_enrich(current_user_id, enrich_id)
+                    # Remove 'causal_graph' field from enrich_data if it exists
+                    if isinstance(enrich_data, dict):
+                        enrich_data.pop('causal_graph', None)
+                    return {
+                        'id': hypothesis_id,
+                        'variant': hypothesis.get('variant') or hypothesis.get('variant_id'),
+                        'enrich_id': enrich_id,
+                        'phenotype': hypothesis['phenotype'],
+                        "status": "completed",
+                        "created_at": hypothesis.get('created_at'),
+                        "result": enrich_data
+                    }, 200
+                else:
+                    return {"message": "Enrichment not found or access denied."}, 404
 
             latest_state = status_tracker.get_latest_state(hypothesis_id)
             
@@ -154,10 +162,12 @@ class HypothesisAPI(Resource):
             if 'enrich_id' in hypothesis and hypothesis.get('enrich_id') is not None:
                 enrich_id = hypothesis.get('enrich_id')
                 status_data['enrich_id'] = enrich_id
-                enrich_data = self.db.get_enrich(current_user_id, enrich_id)
-                if isinstance(enrich_data, dict):
-                    enrich_data.pop('causal_graph', None)
-                status_data['result'] = enrich_data
+                # Check user access before returning enrich data
+                if self.db.user_has_enrich_access(current_user_id, enrich_id):
+                    enrich_data = self.db.get_enrich(current_user_id, enrich_id)
+                    if isinstance(enrich_data, dict):
+                        enrich_data.pop('causal_graph', None)
+                    status_data['result'] = enrich_data
                 
 
             # Check for failed state
@@ -203,6 +213,13 @@ class HypothesisAPI(Resource):
     def post(self, current_user_id):
         enrich_id = request.args.get('id')
         go_id = request.args.get('go')
+
+        if not enrich_id or not go_id:
+            return {"message": "Both enrich_id and go_id are required"}, 400
+
+        # Check if user has access to this enrichment
+        if not self.db.user_has_enrich_access(current_user_id, enrich_id):
+            return {"message": "Enrichment not found or access denied"}, 404
 
         # Get the hypothesis associated with this enrichment
         hypothesis = self.db.get_hypothesis_by_enrich(current_user_id, enrich_id)

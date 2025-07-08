@@ -20,6 +20,7 @@ def check_enrich(db, current_user_id, phenotype, variant, hypothesis_id):
             progress=0  
         )
         
+        # Check globally first, then verify user access if exists
         if db.check_enrich(current_user_id, phenotype, variant):
             enrich = db.get_enrich_by_phenotype_and_variant(phenotype, variant, current_user_id)
             
