@@ -213,7 +213,7 @@ def analysis_pipeline_flow(db, user_id, project_id, gwas_file_path, ref_genome="
         save_analysis_state_task.submit(db, user_id, project_id, initial_state).result()
         
         logger.info(f"[PIPELINE] Stage 1: MungeSumstats preprocessing")
-        munged_file_result = munge_sumstats_preprocessing.submit(gwas_file_path, output_dir, ref_genome=ref_genome, n_threads=14).result()
+        munged_file_result = munge_sumstats_preprocessing.submit(gwas_file_path, output_dir, ref_genome=ref_genome, n_threads=20).result()
         
         # Extract the actual file path from the result
         if isinstance(munged_file_result, tuple):
@@ -354,7 +354,19 @@ def analysis_pipeline_flow(db, user_id, project_id, gwas_file_path, ref_genome="
             # Summary statistics
             total_variants = len(combined_results)
             high_pip_variants = len(combined_results[combined_results['PIP'] > 0.5])
-            total_credible_sets = combined_results.get('credible_set', pd.Series([0])).max()
+            
+            if 'region_id' in combined_results.columns and 'credible_set' in combined_results.columns:
+                credible_set_mask = combined_results['credible_set'] > 0
+                if credible_set_mask.any():
+                    unique_credible_sets = combined_results[credible_set_mask].groupby(['region_id', 'credible_set']).size()
+                    total_credible_sets = len(unique_credible_sets)
+                    logger.info(f"[PIPELINE] Credible sets breakdown: {len(unique_credible_sets)} unique sets across {combined_results['region_id'].nunique()} regions")
+                else:
+                    total_credible_sets = 0
+            else:
+                # Fallback to old method if columns don't exist
+                total_credible_sets = combined_results.get('credible_set', pd.Series([0])).max()
+                logger.warning(f"[PIPELINE] Using fallback credible set counting (missing region_id or credible_set columns)")
             
             # Save completed analysis state
             completed_state = {

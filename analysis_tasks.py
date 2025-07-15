@@ -177,11 +177,22 @@ def munge_sumstats_preprocessing(gwas_file_path, output_dir, ref_genome="GRCh37"
         munged_df = pd.read_csv(formatted_file_path, sep='\t', low_memory=False)
         logger.info(f"[MUNGE] Loaded {munged_df.shape[0]} variants with {munged_df.shape[1]} columns")
         
+        # Preserve original rsID if available
+        has_rsid = 'SNP' in munged_df.columns or 'RSID' in munged_df.columns
+        if has_rsid:
+            rsid_col = 'SNP' if 'SNP' in munged_df.columns else 'RSID'
+            logger.info(f"[MUNGE] Preserving rsIDs from {rsid_col} column")
+        
         # Create CHR:BP:A2:A1 ID format
         munged_df["ID"] = (munged_df["CHR"].astype(str) + ":" + 
                           munged_df["BP"].astype(str) + ":" + 
                           munged_df["A2"] + ":" + 
                           munged_df["A1"])
+        
+        # Keep rsID as separate column if available
+        if has_rsid:
+            munged_df["RSID"] = munged_df[rsid_col]
+            logger.info(f"[MUNGE] Preserved {munged_df['RSID'].notna().sum()} rsIDs")
         
         # Set ID as index 
         munged_df.reset_index(drop=True, inplace=True)
@@ -1087,43 +1098,59 @@ def finemap_region_batch_worker(batch_data):
                         try:
                             from utils import transform_credible_sets_to_locuszoom
                             
-                            lead_variant_id = region['variant_id']
-                            credible_sets_data = []
+                            region_lead_variant_id = region['variant_id']
+                            saved_sets_count = 0
                             
-                            # Transform results
+                            # Process each credible set individually
                             if 'cs' in result.columns:
                                 for cs_id in sorted(result['cs'].unique()):
                                     if cs_id > 0:
                                         cs_variants = result[result['cs'] == cs_id]
+                                        
+                                        # Find the variant with highest PIP in this credible set
+                                        max_pip_idx = cs_variants['PIP'].idxmax()
+                                        credible_set_lead_variant_id = max_pip_idx  # This is the variant ID with highest PIP
+                                        max_pip_value = cs_variants.loc[max_pip_idx, 'PIP']
+                                        
+                                        logger.info(f"[BATCH-{batch_id}] Credible set {cs_id}: lead variant {credible_set_lead_variant_id} (PIP={max_pip_value:.6f})")
+                                        
+                                        # Transform to LocusZoom format
                                         locuszoom_data = transform_credible_sets_to_locuszoom(cs_variants)
                                         
-                                        credible_set = {
+                                        # Create single credible set data structure
+                                        credible_set_data = {
                                             "set_id": int(cs_id),
                                             "coverage": 0.95,
                                             "variants": locuszoom_data
                                         }
-                                        credible_sets_data.append(credible_set)
+                                        
+                                        # Metadata for this specific credible set
+                                        metadata = {
+                                            "chr": region['chr'],
+                                            "position": region['position'],
+                                            "window_kb": 2000,
+                                            "population": "EUR",
+                                            "total_variants_analyzed": len(result),
+                                            "credible_set_id": int(cs_id),
+                                            "credible_set_size": len(cs_variants),
+                                            "lead_variant_pip": float(max_pip_value),
+                                            "region_lead_variant": region_lead_variant_id,
+                                            "completed_at": datetime.now().isoformat()
+                                        }
+                                        
+                                        # Save this single credible set under its own lead variant
+                                        db.save_lead_variant_credible_sets(
+                                            user_id, project_id, credible_set_lead_variant_id, 
+                                            {
+                                                "credible_sets": [credible_set_data],
+                                                "metadata": metadata
+                                            }
+                                        )
+                                        
+                                        saved_sets_count += 1
+                                        logger.info(f"[BATCH-{batch_id}] Saved credible set {cs_id} under lead variant {credible_set_lead_variant_id}")
                             
-                            # Save to database
-                            metadata = {
-                                "chr": region['chr'],
-                                "position": region['position'],
-                                "window_kb": 2000,
-                                "population": "EUR",
-                                "total_variants_analyzed": len(result),
-                                "credible_sets_count": len(credible_sets_data),
-                                "completed_at": datetime.now().isoformat()
-                            }
-                            
-                            db.save_lead_variant_credible_sets(
-                                user_id, project_id, lead_variant_id, 
-                                {
-                                    "credible_sets": credible_sets_data,
-                                    "metadata": metadata
-                                }
-                            )
-                            
-                            logger.info(f"[BATCH-{batch_id}] Saved {len(credible_sets_data)} credible sets for {lead_variant_id}")
+                            logger.info(f"[BATCH-{batch_id}] Saved {saved_sets_count} individual credible sets for region {region_id}")
                             
                         except Exception as save_e:
                             logger.error(f"[BATCH-{batch_id}] Error saving credible sets for {region_id}: {save_e}")
