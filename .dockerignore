@@ -3,3 +3,6 @@ data/susie
 data/uploads
 data/metadata
 data/states
+data/1000Genomes_phase3
+data/raw
+.prefect/
