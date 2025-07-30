@@ -818,6 +818,8 @@ def finemap_region_batch_worker(batch_data):
         coverage = finemap_params['coverage']
         min_abs_corr = finemap_params['min_abs_corr']
         population = finemap_params['population']
+        ref_genome = finemap_params.get('ref_genome', 'Unknown')
+        maf_threshold = finemap_params.get('maf_threshold', 0.01)
         
         # Recreate database connection in worker process
         if db_params:
@@ -937,6 +939,8 @@ def finemap_region_batch_worker(batch_data):
                                 "position": region['position'],
                                 "finemap_window_kb": window,
                                 "population": population,
+                                "ref_genome": ref_genome,
+                                "maf_threshold": maf_threshold,
                                 "seed": seed,
                                 "L": L,
                                 "coverage": coverage,
