@@ -704,7 +704,7 @@ class AnalysisPipelineAPI(Resource):
             file_id = str(uuid.uuid4())
             
             # Create user upload directory
-            user_upload_dir = os.path.join('data', 'uploads', current_user_id)
+            user_upload_dir = os.path.join('data', 'uploads', str(current_user_id))
             os.makedirs(user_upload_dir, exist_ok=True)
             
             # File path for saving
@@ -736,7 +736,7 @@ class AnalysisPipelineAPI(Resource):
             )
             
             # Save metadata to file system
-            metadata_dir = os.path.join('data', 'metadata', current_user_id)
+            metadata_dir = os.path.join('data', 'metadata', str(current_user_id))
             os.makedirs(metadata_dir, exist_ok=True)
             
             metadata = {
