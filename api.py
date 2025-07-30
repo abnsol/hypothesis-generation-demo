@@ -502,9 +502,73 @@ class ProjectsAPI(Resource):
             return self._get_project_with_full_data(current_user_id, project_id)
         
         projects = self.db.get_projects(current_user_id)
+        enhanced_projects = []
+        
+        for project in projects:
+            enhanced_project = {
+                "id": project["id"],
+                "name": project["name"],
+                "phenotype": project.get("phenotype", ""),
+                "gwas_file_id": project["gwas_file_id"],
+                "created_at": project.get("created_at"),
+            }
+            
+            # Add analysis status and progress
+            try:
+                analysis_state = self.db.load_analysis_state(current_user_id, project["id"])
+                if analysis_state:
+                    enhanced_project["analysis_status"] = {
+                        "status": analysis_state.get("status", "unknown"),
+                        "stage": analysis_state.get("stage"),
+                        "progress": analysis_state.get("progress", 0),
+                        "message": analysis_state.get("message"),
+                        "started_at": analysis_state.get("started_at"),
+                        "completed_at": analysis_state.get("completed_at")
+                    }
+                else:
+                    enhanced_project["analysis_status"] = {"status": "not_started", "progress": 0}
+            except Exception as state_e:
+                logger.warning(f"Could not load analysis state for project {project['id']}: {state_e}")
+                enhanced_project["analysis_status"] = {"status": "unknown", "progress": 0}
+            
+            # Extract analysis parameters if available
+            try:
+                credible_sets_raw = self.db.get_lead_variant_credible_sets(current_user_id, project["id"])
+                analysis_params = {}
+                if credible_sets_raw:
+                    if isinstance(credible_sets_raw, list) and credible_sets_raw:
+                        # Extract analysis parameters from first credible set's metadata
+                        if credible_sets_raw[0]["data"].get("metadata"):
+                            metadata = credible_sets_raw[0]["data"]["metadata"]
+                            analysis_params = {
+                                "population": metadata.get("population"),
+                                "ref_genome": metadata.get("ref_genome"),
+                                "finemap_window_kb": metadata.get("finemap_window_kb"),
+                                "coverage": metadata.get("coverage"),
+                                "maf_threshold": metadata.get("maf_threshold")
+                            }
+                    elif not isinstance(credible_sets_raw, list):
+                        # Single result
+                        if credible_sets_raw["data"].get("metadata"):
+                            metadata = credible_sets_raw["data"]["metadata"]
+                            analysis_params = {
+                                "population": metadata.get("population"),
+                                "ref_genome": metadata.get("ref_genome"),
+                                "finemap_window_kb": metadata.get("finemap_window_kb"),
+                                "coverage": metadata.get("coverage"),
+                                "maf_threshold": metadata.get("maf_threshold")
+                            }
+                
+                enhanced_project["analysis_parameters"] = analysis_params
+            except Exception as cs_e:
+                logger.warning(f"Could not load analysis parameters for project {project['id']}: {cs_e}")
+                enhanced_project["analysis_parameters"] = {}
+            
+            enhanced_projects.append(enhanced_project)
+        
         # Serialize datetime objects in all projects
-        projects = serialize_datetime_fields(projects)
-        return {"projects": projects}, 200
+        enhanced_projects = serialize_datetime_fields(enhanced_projects)
+        return {"projects": enhanced_projects}, 200
     
     def _get_project_with_full_data(self, current_user_id, project_id):
         """Get comprehensive project data including state, hypotheses, and credible sets"""
@@ -519,8 +583,12 @@ class ProjectsAPI(Resource):
             if not analysis_state:
                 analysis_state = {"status": "not_started"}
             
-            # Get credible sets (may be empty during processing)
+            # Get credible sets with simplified metadata
             credible_sets_data = []
+            total_credible_sets_count = 0
+            total_variants_count = 0
+            analysis_parameters = {}
+            
             try:
                 credible_sets_raw = self.db.get_lead_variant_credible_sets(current_user_id, project_id)
                 if credible_sets_raw:
@@ -529,17 +597,84 @@ class ProjectsAPI(Resource):
                             {
                                 "lead_variant_id": cs["lead_variant_id"],
                                 "credible_sets": cs["data"].get("credible_sets", []),
-                                "metadata": cs["data"].get("metadata", {})
+                                "metadata": {
+                                    # Keep only region-specific metadata
+                                    "chr": cs["data"].get("metadata", {}).get("chr"),
+                                    "position": cs["data"].get("metadata", {}).get("position"),
+                                    "total_variants_analyzed": cs["data"].get("metadata", {}).get("total_variants_analyzed"),
+                                    "credible_sets_count": cs["data"].get("metadata", {}).get("credible_sets_count"),
+                                    "completed_at": cs["data"].get("metadata", {}).get("completed_at")
+                                },
+                                "credible_sets_count": len(cs["data"].get("credible_sets", [])),
+                                "total_variants_in_lead": sum(
+                                    len(credible_set.get("variants", [])) 
+                                    for credible_set in cs["data"].get("credible_sets", [])
+                                )
                             }
                             for cs in credible_sets_raw
                         ]
+                        
+                        # Calculate total counts
+                        total_credible_sets_count = sum(len(cs["data"].get("credible_sets", [])) for cs in credible_sets_raw)
+                        total_variants_count = sum(
+                            len(credible_set.get("variants", [])) 
+                            for cs in credible_sets_raw 
+                            for credible_set in cs["data"].get("credible_sets", [])
+                        )
+                        
+                        # Extract analysis parameters from first credible set's metadata
+                        if credible_sets_raw and credible_sets_raw[0]["data"].get("metadata"):
+                            metadata = credible_sets_raw[0]["data"]["metadata"]
+                            analysis_parameters = {
+                                "population": metadata.get("population"),
+                                "ref_genome": metadata.get("ref_genome"),
+                                "finemap_window_kb": metadata.get("finemap_window_kb"),
+                                "coverage": metadata.get("coverage"),
+                                "min_abs_corr": metadata.get("min_abs_corr"),
+                                "maf_threshold": metadata.get("maf_threshold"),
+                                "seed": metadata.get("seed"),
+                                "L": metadata.get("L")
+                            }
                     else:
                         # Single result
                         credible_sets_data = [{
                             "lead_variant_id": credible_sets_raw["lead_variant_id"],
                             "credible_sets": credible_sets_raw["data"].get("credible_sets", []),
-                            "metadata": credible_sets_raw["data"].get("metadata", {})
+                            "metadata": {
+                                # Keep only region-specific metadata
+                                "chr": credible_sets_raw["data"].get("metadata", {}).get("chr"),
+                                "position": credible_sets_raw["data"].get("metadata", {}).get("position"),
+                                "total_variants_analyzed": credible_sets_raw["data"].get("metadata", {}).get("total_variants_analyzed"),
+                                "credible_sets_count": credible_sets_raw["data"].get("metadata", {}).get("credible_sets_count"),
+                                "completed_at": credible_sets_raw["data"].get("metadata", {}).get("completed_at")
+                            },
+                            "credible_sets_count": len(credible_sets_raw["data"].get("credible_sets", [])),
+                            "total_variants_in_lead": sum(
+                                len(credible_set.get("variants", []))
+                                for credible_set in credible_sets_raw["data"].get("credible_sets", [])
+                            )
                         }]
+                        
+                        # Calculate total counts for single result
+                        total_credible_sets_count = len(credible_sets_raw["data"].get("credible_sets", []))
+                        total_variants_count = sum(
+                            len(credible_set.get("variants", []))
+                            for credible_set in credible_sets_raw["data"].get("credible_sets", [])
+                        )
+                        
+                        # Extract analysis parameters
+                        if credible_sets_raw["data"].get("metadata"):
+                            metadata = credible_sets_raw["data"]["metadata"]
+                            analysis_parameters = {
+                                "population": metadata.get("population"),
+                                "ref_genome": metadata.get("ref_genome"),
+                                "finemap_window_kb": metadata.get("finemap_window_kb"),
+                                "coverage": metadata.get("coverage"),
+                                "min_abs_corr": metadata.get("min_abs_corr"),
+                                "maf_threshold": metadata.get("maf_threshold"),
+                                "seed": metadata.get("seed"),
+                                "L": metadata.get("L")
+                            }
             except Exception as cs_e:
                 logger.warning(f"Could not load credible sets for project {project_id}: {cs_e}")
                 credible_sets_data = []
@@ -568,7 +703,19 @@ class ProjectsAPI(Resource):
                 "phenotype": project.get("phenotype", ""),
                 "gwas_file_id": project["gwas_file_id"],
                 "created_at": project.get("created_at"),
-                "state": analysis_state,
+                
+                # Summary counts at top level (updated in real-time)
+                "total_credible_sets_count": total_credible_sets_count,
+                "total_variants_count": total_variants_count,
+                
+                # Analysis state and parameters
+                "analysis_state": analysis_state,
+                "analysis_parameters": analysis_parameters,
+                
+                # Credible sets data with simplified metadata
+                "credible_sets": credible_sets_data,
+                
+                # Hypotheses information
                 "hypotheses": project_hypotheses,
                 "credible_sets": credible_sets_data
             }
