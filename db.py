@@ -46,7 +46,7 @@ class Database:
         return {'message': 'Invalid credentials'}, 401
 
     # ==================== PROJECT METHODS ====================
-    def create_project(self, user_id, name, gwas_file_id, phenotype):
+    def create_project(self, user_id, name, gwas_file_id, phenotype, population=None, ref_genome=None, analysis_parameters=None):
         """Create a new project"""
         project_data = {
             'user_id': user_id,
@@ -55,7 +55,10 @@ class Database:
             'created_at': datetime.now(timezone.utc),
             'updated_at': datetime.now(timezone.utc),
             'status': 'active',
-            'gwas_file_id': gwas_file_id
+            'gwas_file_id': gwas_file_id,
+            'population': population,
+            'ref_genome': ref_genome,
+            'analysis_parameters': analysis_parameters or {}
         }
         result = self.projects_collection.insert_one(project_data)
         return str(result.inserted_id)
@@ -95,7 +98,7 @@ class Database:
         return result.deleted_count > 0
 
     # ==================== FILE METADATA METHODS ====================
-    def create_file_metadata(self, user_id, filename, original_filename, file_path, file_type, file_size, md5_hash=None):
+    def create_file_metadata(self, user_id, filename, original_filename, file_path, file_type, file_size, md5_hash=None, record_count=None, download_url=None):
         """Create file metadata entry"""
         file_data = {
             'user_id': user_id,
@@ -105,7 +108,9 @@ class Database:
             'file_type': file_type,
             'file_size': file_size,
             'upload_date': datetime.now(timezone.utc),
-            'md5_hash': md5_hash
+            'md5_hash': md5_hash,
+            'record_count': record_count,
+            'download_url': download_url
         }
         result = self.file_metadata_collection.insert_one(file_data)
         return str(result.inserted_id)
