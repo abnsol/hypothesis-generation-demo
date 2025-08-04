@@ -126,6 +126,11 @@ def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, db, prolog
 
     logger.info(f"Enrich data: {enrich_data}")
 
+    # Handle case where causal_graph is None
+    if causal_graph is None:
+        logger.warning(f"No causal graph available for variant {variant_id} and gene {causal_gene}")
+        return {"message": "No causal graph data available for this variant-gene combination"}, 404
+
     causal_gene_id = get_gene_ids(prolog_query, [causal_gene.lower()], hypothesis_id)[0]
     coexpressed_gene_ids = get_gene_ids(prolog_query, [g.lower() for g in coexpressed_gene_names], hypothesis_id)
 
