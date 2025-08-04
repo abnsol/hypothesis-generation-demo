@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from enum import Enum
+from config import Config, create_dependencies
 
 class TaskState(Enum):
     STARTED = "started"
@@ -9,6 +10,7 @@ class TaskState(Enum):
 
 class StatusTracker:
     _instance = None
+    _db = None  # Class-level database instance
     
     def __new__(cls):
         if cls._instance is None:
@@ -21,6 +23,9 @@ class StatusTracker:
     def initialize(cls, db_instance):
         """Initialize the status tracker with a database instance"""
         cls._db = db_instance
+        # Also set on the instance for consistency
+        if cls._instance:
+            cls._instance._db = db_instance
     
     def add_update(self, hypothesis_id, progress, task_name, state, details=None, error=None):
         if not hypothesis_id:
@@ -50,11 +55,27 @@ class StatusTracker:
             if task_name in ["Creating enrich data", "Generating hypothesis"] or task_name.startswith("Verifying existence") and progress == 80:
                 self._persist_and_clear(hypothesis_id)
     
+    def _ensure_db_connection(self):
+        """Ensure database connection is available, initialize if needed"""
+        if not hasattr(self, '_db') or self._db is None:
+            # Try to get from class variable
+            if self.__class__._db is not None:
+                self._db = self.__class__._db
+            else:
+                config = Config.from_env()
+                deps = create_dependencies(config)
+                self._db = deps['db']
+                self.__class__._db = self._db
+        return self._db
+
     def _persist_and_clear(self, hypothesis_id):
         """Persist task history to DB and clear from memory"""
         if hypothesis_id in self.task_history:
+            # Ensure database connection
+            db = self._ensure_db_connection()
+            
             # Get existing history from DB
-            db_history = self._db.get_task_history(hypothesis_id) or []
+            db_history = db.get_task_history(hypothesis_id) or []
             new_history = self.task_history[hypothesis_id]
             
             # Combine and deduplicate
@@ -68,7 +89,7 @@ class StatusTracker:
             final_history = sorted(deduplicated.values(), key=lambda x: x['timestamp'])
             
             # Save to DB
-            self._db.save_task_history(hypothesis_id, final_history)
+            db.save_task_history(hypothesis_id, final_history)
             
             # Clear from memory
             del self.task_history[hypothesis_id]
@@ -77,7 +98,10 @@ class StatusTracker:
     def get_history(self, hypothesis_id):
         """Get complete task history from memory and DB without duplicates"""
         memory_history = self.task_history.get(hypothesis_id, [])
-        db_history = self._db.get_task_history(hypothesis_id) if hypothesis_id in self.completed_hypotheses else []
+        
+        # Ensure database connection
+        db = self._ensure_db_connection()
+        db_history = db.get_task_history(hypothesis_id) if hypothesis_id in self.completed_hypotheses else []
         
         # Combine histories
         combined_history = memory_history + db_history
