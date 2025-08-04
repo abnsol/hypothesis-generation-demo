@@ -14,6 +14,7 @@ from api import (
     init_socket_handlers,
     ProjectsAPI,
     AnalysisPipelineAPI,
+    FileDownloadAPI,
 )
 from dotenv import load_dotenv
 import os
@@ -109,6 +110,9 @@ def setup_api(config):
     # project-based workflow
     api.add_resource(ProjectsAPI, "/projects", resource_class_kwargs={"db": deps['db']})
     api.add_resource(AnalysisPipelineAPI, "/analysis-pipeline", resource_class_kwargs={"db": deps['db']})
+    
+    # file management
+    api.add_resource(FileDownloadAPI, "/download/<string:file_id>", resource_class_kwargs={"db": deps['db']})
 
     # Initialize socket handlers 
     socket_namespace = init_socket_handlers(deps['db'])

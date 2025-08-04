@@ -1,7 +1,7 @@
 import os
 from threading import Thread, Timer
 import uuid
-from flask import json, request
+from flask import json, request, send_file
 from flask_restful import Resource
 from flask_socketio import join_room, leave_room
 from socketio_instance import socketio
@@ -17,6 +17,8 @@ from utils import allowed_file, transform_credible_sets_to_locuszoom
 from loguru import logger
 from werkzeug.utils import secure_filename
 from utils import serialize_datetime_fields
+from project_tasks import count_gwas_records, get_project_with_full_data
+from bson import ObjectId
 
 
 class EnrichAPI(Resource):
@@ -499,7 +501,10 @@ class ProjectsAPI(Resource):
         project_id = request.args.get('id')
         
         if project_id:
-            return self._get_project_with_full_data(current_user_id, project_id)
+            response_data, status_code = get_project_with_full_data(self.db, current_user_id, project_id)
+            if status_code == 200:
+                response_data = serialize_datetime_fields(response_data)
+            return response_data, status_code
         
         projects = self.db.get_projects(current_user_id)
         enhanced_projects = []
@@ -509,224 +514,98 @@ class ProjectsAPI(Resource):
                 "id": project["id"],
                 "name": project["name"],
                 "phenotype": project.get("phenotype", ""),
-                "gwas_file_id": project["gwas_file_id"],
                 "created_at": project.get("created_at"),
             }
             
-            # Add analysis status and progress
+            # Add GWAS file information
+            try:
+                file_metadata = self.db.get_file_metadata(current_user_id, project["gwas_file_id"])
+                if file_metadata:
+                    # Use stored download URL or generate fallback
+                    enhanced_project["gwas_file"] = file_metadata.get("download_url", f"/download/{project['gwas_file_id']}")
+                    
+                    # Use stored record count or calculate fallback
+                    enhanced_project["gwas_records_count"] = file_metadata.get("record_count", 0)
+                    
+                    # If record count is missing, calculate and update it
+                    if enhanced_project["gwas_records_count"] == 0:
+                        gwas_records_count = count_gwas_records(file_metadata["file_path"])
+                        enhanced_project["gwas_records_count"] = gwas_records_count
+                        # Update the database with calculated count
+                        self.db.file_metadata_collection.update_one(
+                            {'_id': ObjectId(project["gwas_file_id"])},
+                            {'$set': {'record_count': gwas_records_count}}
+                        )
+                else:
+                    enhanced_project["gwas_file"] = None
+                    enhanced_project["gwas_records_count"] = 0
+            except Exception as file_e:
+                logger.warning(f"Could not load file metadata for project {project['id']}: {file_e}")
+                enhanced_project["gwas_file"] = None
+                enhanced_project["gwas_records_count"] = 0
+            
+            # Add analysis status
             try:
                 analysis_state = self.db.load_analysis_state(current_user_id, project["id"])
                 if analysis_state:
-                    enhanced_project["analysis_status"] = {
-                        "status": analysis_state.get("status", "unknown"),
-                        "stage": analysis_state.get("stage"),
-                        "progress": analysis_state.get("progress", 0),
-                        "message": analysis_state.get("message"),
-                        "started_at": analysis_state.get("started_at"),
-                        "completed_at": analysis_state.get("completed_at")
-                    }
+                    enhanced_project["status"] = analysis_state.get("status", "Not_started")
                 else:
-                    enhanced_project["analysis_status"] = {"status": "not_started", "progress": 0}
+                    enhanced_project["status"] = "Not_started"  # Default for projects without analysis state
             except Exception as state_e:
                 logger.warning(f"Could not load analysis state for project {project['id']}: {state_e}")
-                enhanced_project["analysis_status"] = {"status": "unknown", "progress": 0}
+                enhanced_project["status"] = "Completed"
             
-            # Extract analysis parameters if available
-            try:
-                credible_sets_raw = self.db.get_lead_variant_credible_sets(current_user_id, project["id"])
-                analysis_params = {}
-                if credible_sets_raw:
-                    if isinstance(credible_sets_raw, list) and credible_sets_raw:
-                        # Extract analysis parameters from first credible set's metadata
-                        if credible_sets_raw[0]["data"].get("metadata"):
-                            metadata = credible_sets_raw[0]["data"]["metadata"]
-                            analysis_params = {
-                                "population": metadata.get("population"),
-                                "ref_genome": metadata.get("ref_genome"),
-                                "finemap_window_kb": metadata.get("finemap_window_kb"),
-                                "coverage": metadata.get("coverage"),
-                                "maf_threshold": metadata.get("maf_threshold")
-                            }
-                    elif not isinstance(credible_sets_raw, list):
-                        # Single result
-                        if credible_sets_raw["data"].get("metadata"):
-                            metadata = credible_sets_raw["data"]["metadata"]
-                            analysis_params = {
-                                "population": metadata.get("population"),
-                                "ref_genome": metadata.get("ref_genome"),
-                                "finemap_window_kb": metadata.get("finemap_window_kb"),
-                                "coverage": metadata.get("coverage"),
-                                "maf_threshold": metadata.get("maf_threshold")
-                            }
-                
-                enhanced_project["analysis_parameters"] = analysis_params
-            except Exception as cs_e:
-                logger.warning(f"Could not load analysis parameters for project {project['id']}: {cs_e}")
-                enhanced_project["analysis_parameters"] = {}
+            # Get analysis parameters from project (stored during creation)
+            enhanced_project["population"] = project.get("population")
+            enhanced_project["ref_genome"] = project.get("ref_genome")
             
-            enhanced_projects.append(enhanced_project)
-        
-        # Serialize datetime objects in all projects
-        enhanced_projects = serialize_datetime_fields(enhanced_projects)
-        return {"projects": enhanced_projects}, 200
-    
-    def _get_project_with_full_data(self, current_user_id, project_id):
-        """Get comprehensive project data including state, hypotheses, and credible sets"""
-        try:
-            # Get basic project info
-            project = self.db.get_projects(current_user_id, project_id)
-            if not project:
-                return {"error": "Project not found"}, 404
-            
-            # Get analysis state (may be None for new projects)
-            analysis_state = self.db.load_analysis_state(current_user_id, project_id)
-            if not analysis_state:
-                analysis_state = {"status": "not_started"}
-            
-            # Get credible sets with simplified metadata
-            credible_sets_data = []
+            # Extract credible sets and variants counts
             total_credible_sets_count = 0
             total_variants_count = 0
-            analysis_parameters = {}
             
             try:
-                credible_sets_raw = self.db.get_lead_variant_credible_sets(current_user_id, project_id)
+                credible_sets_raw = self.db.get_lead_variant_credible_sets(current_user_id, project["id"])
                 if credible_sets_raw:
-                    if isinstance(credible_sets_raw, list):
-                        credible_sets_data = [
-                            {
-                                "lead_variant_id": cs["lead_variant_id"],
-                                "credible_sets": cs["data"].get("credible_sets", []),
-                                "metadata": {
-                                    # Keep only region-specific metadata
-                                    "chr": cs["data"].get("metadata", {}).get("chr"),
-                                    "position": cs["data"].get("metadata", {}).get("position"),
-                                    "total_variants_analyzed": cs["data"].get("metadata", {}).get("total_variants_analyzed"),
-                                    "credible_sets_count": cs["data"].get("metadata", {}).get("credible_sets_count"),
-                                    "completed_at": cs["data"].get("metadata", {}).get("completed_at")
-                                },
-                                "credible_sets_count": len(cs["data"].get("credible_sets", [])),
-                                "total_variants_in_lead": sum(
-                                    len(credible_set.get("variants", [])) 
-                                    for credible_set in cs["data"].get("credible_sets", [])
-                                )
-                            }
-                            for cs in credible_sets_raw
-                        ]
-                        
-                        # Calculate total counts
+                    if isinstance(credible_sets_raw, list) and credible_sets_raw:
+                        # Calculate totals from credible sets
                         total_credible_sets_count = sum(len(cs["data"].get("credible_sets", [])) for cs in credible_sets_raw)
                         total_variants_count = sum(
                             len(credible_set.get("variants", [])) 
                             for cs in credible_sets_raw 
                             for credible_set in cs["data"].get("credible_sets", [])
                         )
-                        
-                        # Extract analysis parameters from first credible set's metadata
-                        if credible_sets_raw and credible_sets_raw[0]["data"].get("metadata"):
-                            metadata = credible_sets_raw[0]["data"]["metadata"]
-                            analysis_parameters = {
-                                "population": metadata.get("population"),
-                                "ref_genome": metadata.get("ref_genome"),
-                                "finemap_window_kb": metadata.get("finemap_window_kb"),
-                                "coverage": metadata.get("coverage"),
-                                "min_abs_corr": metadata.get("min_abs_corr"),
-                                "maf_threshold": metadata.get("maf_threshold"),
-                                "seed": metadata.get("seed"),
-                                "L": metadata.get("L")
-                            }
-                    else:
+                    elif not isinstance(credible_sets_raw, list):
                         # Single result
-                        credible_sets_data = [{
-                            "lead_variant_id": credible_sets_raw["lead_variant_id"],
-                            "credible_sets": credible_sets_raw["data"].get("credible_sets", []),
-                            "metadata": {
-                                # Keep only region-specific metadata
-                                "chr": credible_sets_raw["data"].get("metadata", {}).get("chr"),
-                                "position": credible_sets_raw["data"].get("metadata", {}).get("position"),
-                                "total_variants_analyzed": credible_sets_raw["data"].get("metadata", {}).get("total_variants_analyzed"),
-                                "credible_sets_count": credible_sets_raw["data"].get("metadata", {}).get("credible_sets_count"),
-                                "completed_at": credible_sets_raw["data"].get("metadata", {}).get("completed_at")
-                            },
-                            "credible_sets_count": len(credible_sets_raw["data"].get("credible_sets", [])),
-                            "total_variants_in_lead": sum(
-                                len(credible_set.get("variants", []))
-                                for credible_set in credible_sets_raw["data"].get("credible_sets", [])
-                            )
-                        }]
-                        
-                        # Calculate total counts for single result
                         total_credible_sets_count = len(credible_sets_raw["data"].get("credible_sets", []))
                         total_variants_count = sum(
                             len(credible_set.get("variants", []))
                             for credible_set in credible_sets_raw["data"].get("credible_sets", [])
                         )
-                        
-                        # Extract analysis parameters
-                        if credible_sets_raw["data"].get("metadata"):
-                            metadata = credible_sets_raw["data"]["metadata"]
-                            analysis_parameters = {
-                                "population": metadata.get("population"),
-                                "ref_genome": metadata.get("ref_genome"),
-                                "finemap_window_kb": metadata.get("finemap_window_kb"),
-                                "coverage": metadata.get("coverage"),
-                                "min_abs_corr": metadata.get("min_abs_corr"),
-                                "maf_threshold": metadata.get("maf_threshold"),
-                                "seed": metadata.get("seed"),
-                                "L": metadata.get("L")
-                            }
             except Exception as cs_e:
-                logger.warning(f"Could not load credible sets for project {project_id}: {cs_e}")
-                credible_sets_data = []
+                logger.warning(f"Could not load credible sets for project {project['id']}: {cs_e}")
             
-            # Get hypotheses for this project (id + variant only)
-            project_hypotheses = []
+            # Add counts to project
+            enhanced_project["total_credible_sets_count"] = total_credible_sets_count
+            enhanced_project["total_variants_count"] = total_variants_count
+            
+            # Count hypotheses for this project
+            hypothesis_count = 0
             try:
                 all_hypotheses = self.db.get_hypotheses(current_user_id)
                 if isinstance(all_hypotheses, list):
-                    project_hypotheses = [
-                        {
-                            "id": h["id"], 
-                            "variant": h.get("variant") or h.get("variant_id")
-                        }
-                        for h in all_hypotheses 
-                        if h.get('project_id') == project_id
-                    ]
+                    hypothesis_count = len([h for h in all_hypotheses if h.get('project_id') == project["id"]])
+                elif all_hypotheses and all_hypotheses.get('project_id') == project["id"]:
+                    hypothesis_count = 1
             except Exception as hyp_e:
-                logger.warning(f"Could not load hypotheses for project {project_id}: {hyp_e}")
-                project_hypotheses = []
+                logger.warning(f"Could not count hypotheses for project {project['id']}: {hyp_e}")
             
-            # Build comprehensive response
-            response = {
-                "id": project["id"],
-                "name": project["name"],
-                "phenotype": project.get("phenotype", ""),
-                "gwas_file_id": project["gwas_file_id"],
-                "created_at": project.get("created_at"),
-                
-                # Summary counts at top level (updated in real-time)
-                "total_credible_sets_count": total_credible_sets_count,
-                "total_variants_count": total_variants_count,
-                
-                # Analysis state and parameters
-                "analysis_state": analysis_state,
-                "analysis_parameters": analysis_parameters,
-                
-                # Credible sets data with simplified metadata
-                "credible_sets": credible_sets_data,
-                
-                # Hypotheses information
-                "hypotheses": project_hypotheses,
-                "credible_sets": credible_sets_data
-            }
+            enhanced_project["hypothesis_count"] = hypothesis_count
             
-            # Serialize datetime objects before returning
-            response = serialize_datetime_fields(response)
-            return response, 200
-            
-        except Exception as e:
-            logger.error(f"Error getting comprehensive project data for {project_id}: {str(e)}")
-            return {"error": f"Error retrieving project data: {str(e)}"}, 500
+            enhanced_projects.append(enhanced_project)
+        
+        # Serialize datetime objects in all projects
+        enhanced_projects = serialize_datetime_fields(enhanced_projects)
+        return {"projects": enhanced_projects}, 200
     
     @token_required
     def post(self, current_user_id):
@@ -741,7 +620,10 @@ class ProjectsAPI(Resource):
                 current_user_id, 
                 data['name'], 
                 data['gwas_file_id'],
-                data['phenotype']
+                data['phenotype'],
+                population=data.get('population'),
+                ref_genome=data.get('ref_genome'),
+                analysis_parameters=data.get('analysis_parameters')
             )
             
             project = self.db.get_projects(current_user_id, project_id)
@@ -864,22 +746,47 @@ class AnalysisPipelineAPI(Resource):
             gwas_file.save(file_path)
             file_size = os.path.getsize(file_path)
             
-            # Create file metadata in database
+            gwas_records_count = count_gwas_records(file_path)
+            
+            # Create file metadata in database with record count
             file_metadata_id = self.db.create_file_metadata(
                 user_id=current_user_id,
                 filename=filename,
                 original_filename=gwas_file.filename,
                 file_path=file_path,
                 file_type='gwas',
-                file_size=file_size
+                file_size=file_size,
+                record_count=gwas_records_count,
+                download_url=f"/download/{str(uuid.uuid4())}"
             )
             
-            # Create project automatically
+            # Update download URL with actual file ID
+            self.db.file_metadata_collection.update_one(
+                {'_id': ObjectId(file_metadata_id)},
+                {'$set': {'download_url': f"/download/{file_metadata_id}"}}
+            )
+            
+            # Prepare analysis parameters
+            analysis_parameters = {
+                'maf_threshold': maf_threshold,
+                'seed': seed,
+                'window': window,
+                'L': L,
+                'coverage': coverage,
+                'min_abs_corr': min_abs_corr,
+                'batch_size': batch_size,
+                'max_workers': max_workers
+            }
+            
+            # Create project with analysis parameters
             project_id = self.db.create_project(
                 user_id=current_user_id,
                 name=project_name,
                 gwas_file_id=file_metadata_id,
-                phenotype=phenotype
+                phenotype=phenotype,
+                population=population,
+                ref_genome=ref_genome,
+                analysis_parameters=analysis_parameters
             )
             
             # Save metadata to file system
@@ -958,5 +865,46 @@ class AnalysisPipelineAPI(Resource):
             return {"error": f"Error starting analysis pipeline: {str(e)}"}, 500
 
 
+class FileDownloadAPI(Resource):
+    """
+    API endpoint for downloading files
+    """
+    def __init__(self, db):
+        self.db = db
+    
+    @token_required
+    def get(self, current_user_id, file_id):
+        """Download a file by file_id"""
+        try:
+            logger.info(f"[DOWNLOAD] Download request for file {file_id} by user {current_user_id}")
+            
+            # Get file metadata
+            file_metadata = self.db.get_file_metadata(current_user_id, file_id)
+            if not file_metadata:
+                logger.warning(f"[DOWNLOAD] File metadata not found for file {file_id}")
+                return {"error": "File not found or access denied"}, 404
+            
+            # Check if file exists on disk
+            file_path = file_metadata['file_path']
+            if not os.path.exists(file_path):
+                logger.error(f"[DOWNLOAD] File not found on disk: {file_path}")
+                return {"error": "File not found on disk"}, 404
+            
+            # Get original filename for download
+            original_filename = file_metadata.get('original_filename', file_metadata.get('filename', 'download'))
+            
+            logger.info(f"[DOWNLOAD] Serving file: {original_filename} (Path: {file_path})")
+            
+            # Return file for download
+            return send_file(
+                file_path,
+                as_attachment=True,
+                download_name=original_filename,
+                mimetype='application/octet-stream'  # Generic binary file type
+            )
+            
+        except Exception as e:
+            logger.error(f"[DOWNLOAD] Error downloading file {file_id}: {str(e)}")
+            return {"error": f"Download failed: {str(e)}"}, 500
 
 
