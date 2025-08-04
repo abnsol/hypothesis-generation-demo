@@ -18,7 +18,7 @@ def token_required(f):
     def decorated(self, *args, **kwargs):
         token = request.headers.get('Authorization')
         if not token:
-            return jsonify({'message': 'Token is missing!'}), 403
+            return {'message': 'Token is missing!'}, 403
         
         try:
             # Remove 'Bearer' prefix if present
