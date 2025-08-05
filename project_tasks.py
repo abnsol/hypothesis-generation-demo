@@ -244,7 +244,8 @@ def get_project_with_full_data(db, user_id, project_id):
                     {
                         "id": h["id"], 
                         "variant": h.get("variant") or h.get("variant_id"),
-                        "status": h.get("status", "pending")
+                        "status": h.get("status", "pending"),
+                        "causal_gene": h.get("causal_gene")
                     }
                     for h in all_hypotheses 
                     if h.get('project_id') == project_id
