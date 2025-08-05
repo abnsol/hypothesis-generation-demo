@@ -69,7 +69,7 @@ COPY ./pl /app/pl
 # Install Prolog libraries using pack_install
 RUN apt-get update && apt-get install -y git graphviz && \
     swipl -g "pack_install('prolog_library_collection', [interactive(false)])" -t halt && \
-    swipl -g "pack_install('prolog_graphviz', [interactive(false)])" -t halt \
+    swipl -g "pack_install('prolog_graphviz', [interactive(false)])" -t halt && \
     swipl -g "pack_install('interpolate', [interactive(false)])" -t halt 
     
 
