@@ -907,4 +907,39 @@ class FileDownloadAPI(Resource):
             logger.error(f"[DOWNLOAD] Error downloading file {file_id}: {str(e)}")
             return {"error": f"Download failed: {str(e)}"}, 500
 
+class CredibleSetsAPI(Resource):
+    """
+    API endpoint for fetching credible sets
+    """
+    def __init__(self, db):
+        self.db = db
+
+    @token_required
+    def get(self, current_user_id):
+        """Get credible sets for the current user"""
+        project_id = request.args.get('project_id')
+        lead_variant_id = request.args.get('lead_variant_id')
+        
+        if not project_id:
+            return {"error": "project_id is required"}, 400
+        
+        if not lead_variant_id:
+            return {"error": "lead_variant_id is required"}, 400
+        
+        try:
+            credible_sets = self.db.get_lead_variant_credible_sets(current_user_id, project_id, lead_variant_id)
+            if not credible_sets:
+                return {"message": "No credible sets found for this project or lead variant"}, 404
+            
+            # Serialize datetime objects before returning
+            credible_sets = serialize_datetime_fields(credible_sets)
+            result = credible_sets.get("data", {}).get("credible_sets", [])
+
+            return {"credible_sets": result}, 200
+
+            
+        except Exception as e:
+            logger.error(f"Error fetching credible sets: {str(e)}")
+            return {"error": f"Failed to fetch credible sets: {str(e)}"}, 500
+
 

@@ -915,8 +915,28 @@ def finemap_region_batch_worker(batch_data):
                     if db and user_id and project_id:
                         try:
                             from utils import transform_credible_sets_to_locuszoom
-                            
-                            lead_variant_id = region['variant_id']
+                            # Determine lead variant
+                            try:
+                                if 'cs' in result.columns and (result['cs'] > 0).any():
+                                    candidate_df = result[result['cs'] > 0]
+                                else:
+                                    candidate_df = result
+
+                                lead_variant_id = None
+
+                                if 'PIP' in candidate_df.columns:
+                                    try:
+                                        lead_variant_id = candidate_df['PIP'].astype(float).idxmax()
+                                    except Exception:
+                                        lead_variant_id = None
+
+                                if lead_variant_id is None:
+                                    lead_variant_id = str(candidate_df.index[0])
+
+                                logger.info(f"[BATCH-{batch_id}] Lead variant selected from results: {lead_variant_id}")
+                            except Exception as lead_e:
+                                logger.warning(f"[BATCH-{batch_id}] Lead selection from results failed ({lead_e}); using region seed {region['variant_id']}")
+                                lead_variant_id = region['variant_id']
                             credible_sets_data = []
                             
                             # Transform results

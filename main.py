@@ -7,6 +7,7 @@ import werkzeug
 from config import Config, create_dependencies
 from logging_config import setup_logging
 from api import (
+    CredibleSetsAPI,
     EnrichAPI,
     HypothesisAPI, 
     BulkHypothesisDeleteAPI,
@@ -110,6 +111,7 @@ def setup_api(config):
     # project-based workflow
     api.add_resource(ProjectsAPI, "/projects", resource_class_kwargs={"db": deps['db']})
     api.add_resource(AnalysisPipelineAPI, "/analysis-pipeline", resource_class_kwargs={"db": deps['db']})
+    api.add_resource(CredibleSetsAPI, "/credible-sets", resource_class_kwargs={"db": deps['db']})
     
     # file management
     api.add_resource(FileDownloadAPI, "/download/<string:file_id>", resource_class_kwargs={"db": deps['db']})
