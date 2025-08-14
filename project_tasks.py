@@ -50,27 +50,6 @@ def create_analysis_result_task(db, user_id, project_id, combined_results, outpu
         raise
 
 
-@task(cache_policy=None)
-def save_lead_variant_credible_sets_task(db, user_id, project_id, lead_variant_id, credible_sets_data, metadata):
-    """Save credible sets for a single lead variant incrementally"""
-    try:
-        # Organize data by lead variant
-        lead_variant_data = {
-            "lead_variant_id": lead_variant_id,
-            "credible_sets": credible_sets_data,
-            "metadata": metadata,
-            "saved_at": datetime.now().isoformat()
-        }
-        
-        # Save to database immediately
-        db.save_lead_variant_credible_sets(user_id, project_id, lead_variant_id, lead_variant_data)
-        
-        logger.info(f"Saved credible sets for lead variant {lead_variant_id}: {len(credible_sets_data)} sets")
-        return True
-    except Exception as e:
-        logger.error(f"Error saving credible sets for lead variant {lead_variant_id}: {str(e)}")
-        raise
-
 
 @task(cache_policy=None)
 def get_project_analysis_path_task(db, user_id, project_id):
@@ -146,91 +125,26 @@ def get_project_with_full_data(db, user_id, project_id):
         analysis_parameters = {}
         
         try:
-            credible_sets_raw = db.get_lead_variant_credible_sets(user_id, project_id)
-            if credible_sets_raw:
-                if isinstance(credible_sets_raw, list):
-                    credible_sets_data = [
-                        {
-                            "lead_variant_id": cs["lead_variant_id"],
-                            "credible_sets": cs["data"].get("credible_sets", []),
-                            "metadata": {
-                                # Keep only region-specific metadata
-                                "chr": cs["data"].get("metadata", {}).get("chr"),
-                                "position": cs["data"].get("metadata", {}).get("position"),
-                                "total_variants_analyzed": cs["data"].get("metadata", {}).get("total_variants_analyzed"),
-                                "credible_sets_count": cs["data"].get("metadata", {}).get("credible_sets_count"),
-                                "completed_at": cs["data"].get("metadata", {}).get("completed_at")
-                            },
-                            "credible_sets_count": len(cs["data"].get("credible_sets", [])),
-                            "total_variants_in_lead": sum(
-                                len(credible_set.get("variants", [])) 
-                                for credible_set in cs["data"].get("credible_sets", [])
-                            )
-                        }
-                        for cs in credible_sets_raw
-                    ]
-                    
-                    # Calculate total counts
-                    total_credible_sets_count = sum(len(cs["data"].get("credible_sets", [])) for cs in credible_sets_raw)
-                    total_variants_count = sum(
-                        len(credible_set.get("variants", [])) 
-                        for cs in credible_sets_raw 
-                        for credible_set in cs["data"].get("credible_sets", [])
-                    )
-                    
-                    # Extract analysis parameters from first credible set's metadata
-                    if credible_sets_raw and credible_sets_raw[0]["data"].get("metadata"):
-                        metadata = credible_sets_raw[0]["data"]["metadata"]
-                        analysis_parameters = {
-                            "population": metadata.get("population"),
-                            "ref_genome": metadata.get("ref_genome"),
-                            "finemap_window_kb": metadata.get("finemap_window_kb"),
-                            "coverage": metadata.get("coverage"),
-                            "min_abs_corr": metadata.get("min_abs_corr"),
-                            "maf_threshold": metadata.get("maf_threshold"),
-                            "seed": metadata.get("seed"),
-                            "L": metadata.get("L")
-                        }
-                else:
-                    # Single result
-                    credible_sets_data = [{
-                        "lead_variant_id": credible_sets_raw["lead_variant_id"],
-                        "credible_sets": credible_sets_raw["data"].get("credible_sets", []),
-                        "metadata": {
-                            # Keep only region-specific metadata
-                            "chr": credible_sets_raw["data"].get("metadata", {}).get("chr"),
-                            "position": credible_sets_raw["data"].get("metadata", {}).get("position"),
-                            "total_variants_analyzed": credible_sets_raw["data"].get("metadata", {}).get("total_variants_analyzed"),
-                            "credible_sets_count": credible_sets_raw["data"].get("metadata", {}).get("credible_sets_count"),
-                            "completed_at": credible_sets_raw["data"].get("metadata", {}).get("completed_at")
-                        },
-                        "credible_sets_count": len(credible_sets_raw["data"].get("credible_sets", [])),
-                        "total_variants_in_lead": sum(
-                            len(credible_set.get("variants", []))
-                            for credible_set in credible_sets_raw["data"].get("credible_sets", [])
-                        )
-                    }]
-                    
-                    # Calculate total counts for single result
-                    total_credible_sets_count = len(credible_sets_raw["data"].get("credible_sets", []))
-                    total_variants_count = sum(
-                        len(credible_set.get("variants", []))
-                        for credible_set in credible_sets_raw["data"].get("credible_sets", [])
-                    )
-                    
-                    # Extract analysis parameters
-                    if credible_sets_raw["data"].get("metadata"):
-                        metadata = credible_sets_raw["data"]["metadata"]
-                        analysis_parameters = {
-                            "population": metadata.get("population"),
-                            "ref_genome": metadata.get("ref_genome"),
-                            "finemap_window_kb": metadata.get("finemap_window_kb"),
-                            "coverage": metadata.get("coverage"),
-                            "min_abs_corr": metadata.get("min_abs_corr"),
-                            "maf_threshold": metadata.get("maf_threshold"),
-                            "seed": metadata.get("seed"),
-                            "L": metadata.get("L")
-                        }
+            credible_sets_data = db.get_credible_sets_for_project(user_id, project_id)
+            if credible_sets_data:
+                total_credible_sets_count = len(credible_sets_data)
+                total_variants_count = sum(cs.get("variants_count", 0) for cs in credible_sets_data)
+            else:
+                credible_sets_data = []
+            
+            # Extract analysis parameters from first credible set's metadata if available
+            if credible_sets_data and credible_sets_data[0].get("metadata"):
+                metadata = credible_sets_data[0]["metadata"]
+                analysis_parameters = {
+                    "population": metadata.get("population"),
+                    "ref_genome": metadata.get("ref_genome"),
+                    "finemap_window_kb": metadata.get("finemap_window_kb"),
+                    "coverage": metadata.get("coverage"),
+                    "min_abs_corr": metadata.get("min_abs_corr"),
+                    "maf_threshold": metadata.get("maf_threshold"),
+                    "seed": metadata.get("seed"),
+                    "L": metadata.get("L")
+                }
         except Exception as cs_e:
             logger.warning(f"Could not load credible sets for project {project_id}: {cs_e}")
             credible_sets_data = []
@@ -267,16 +181,15 @@ def get_project_with_full_data(db, user_id, project_id):
             "total_credible_sets_count": total_credible_sets_count,
             "total_variants_count": total_variants_count,
             
-            # Analysis state and parameters
+            # Analysis state and parameters  
             "analysis_state": analysis_state,
             "analysis_parameters": analysis_parameters,
             
-            # Credible sets data with simplified metadata
+            # Credible sets data
             "credible_sets": credible_sets_data,
             
             # Hypotheses information
-            "hypotheses": project_hypotheses,
-            "credible_sets": credible_sets_data
+            "hypotheses": project_hypotheses
         }
         
         return response, 200
