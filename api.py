@@ -916,7 +916,7 @@ class CredibleSetsAPI(Resource):
 
     @token_required
     def get(self, current_user_id):
-        """Get credible sets for the current user"""
+        """Get credible set details by lead variant ID"""
         project_id = request.args.get('project_id')
         lead_variant_id = request.args.get('lead_variant_id')
         
@@ -927,19 +927,23 @@ class CredibleSetsAPI(Resource):
             return {"error": "lead_variant_id is required"}, 400
         
         try:
-            credible_sets = self.db.get_lead_variant_credible_sets(current_user_id, project_id, lead_variant_id)
-            if not credible_sets:
-                return {"message": "No credible sets found for this project or lead variant"}, 404
+            # Get the credible set for this specific lead variant
+            credible_set = self.db.get_credible_set_by_lead_variant(current_user_id, project_id, lead_variant_id)
+            if not credible_set:
+                return {"message": "No credible set found for this lead variant"}, 404
             
-            # Serialize datetime objects before returning
-            credible_sets = serialize_datetime_fields(credible_sets)
-            result = credible_sets.get("data", {}).get("credible_sets", [])
-
-            return {"credible_sets": result}, 200
-
+            # Extract variants data 
+            variants_data = credible_set.get("variants_data", {})
+            if not variants_data:
+                return {"message": "No variants data found for this credible set"}, 404
             
+            variants = variants_data.get("data", {})
+
+            variants = serialize_datetime_fields(variants)
+            return {"variants": variants}, 200
+
         except Exception as e:
-            logger.error(f"Error fetching credible sets: {str(e)}")
-            return {"error": f"Failed to fetch credible sets: {str(e)}"}, 500
+            logger.error(f"Error fetching credible set: {str(e)}")
+            return {"error": f"Failed to fetch credible set: {str(e)}"}, 500
 
 
