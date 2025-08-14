@@ -217,7 +217,7 @@ class Database:
                 'log_pvalue': variants_data['log_pvalue'][max_idx],
                 'position': variants_data['position'][max_idx],
                 'ref_allele': variants_data['ref_allele'][max_idx],
-                'alt_allele': variants_data['alt_allele'][max_idx],
+                'minor_allele': variants_data['minor_allele'][max_idx],
                 'ref_allele_freq': variants_data['ref_allele_freq'][max_idx],
                 'posterior_prob': variants_data['posterior_prob'][max_idx]
             }
