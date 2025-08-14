@@ -20,12 +20,9 @@ class StatusTracker:
         return cls._instance
     
     @classmethod
-    def initialize(cls, db_instance):
-        """Initialize the status tracker with a database instance"""
-        cls._db = db_instance
-        # Also set on the instance for consistency
-        if cls._instance:
-            cls._instance._db = db_instance
+    def initialize(cls, task_handler):
+        """Initialize the status tracker with a task handler"""
+        cls._task_handler = task_handler
     
     def add_update(self, hypothesis_id, progress, task_name, state, details=None, error=None):
         if not hypothesis_id:
@@ -75,7 +72,7 @@ class StatusTracker:
             db = self._ensure_db_connection()
             
             # Get existing history from DB
-            db_history = db.get_task_history(hypothesis_id) or []
+            db_history = self._task_handler.get_task_history(hypothesis_id) or []
             new_history = self.task_history[hypothesis_id]
             
             # Combine and deduplicate
@@ -89,7 +86,7 @@ class StatusTracker:
             final_history = sorted(deduplicated.values(), key=lambda x: x['timestamp'])
             
             # Save to DB
-            db.save_task_history(hypothesis_id, final_history)
+            self._task_handler.save_task_history(hypothesis_id, final_history)
             
             # Clear from memory
             del self.task_history[hypothesis_id]
@@ -98,10 +95,7 @@ class StatusTracker:
     def get_history(self, hypothesis_id):
         """Get complete task history from memory and DB without duplicates"""
         memory_history = self.task_history.get(hypothesis_id, [])
-        
-        # Ensure database connection
-        db = self._ensure_db_connection()
-        db_history = db.get_task_history(hypothesis_id) if hypothesis_id in self.completed_hypotheses else []
+        db_history = self._task_handler.get_task_history(hypothesis_id) if hypothesis_id in self.completed_hypotheses else []
         
         # Combine histories
         combined_history = memory_history + db_history

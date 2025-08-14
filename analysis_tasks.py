@@ -563,7 +563,7 @@ def finemap_region(seed, sumstats, chr_num, lead_variant_position, window=2000,
                 logger.error(f"[FINEMAP] Error converting data to R objects: {str(e)}")
                 return None
         
-        # All SuSiE operations happen outside conversion context (like simplified_finemapping.py)
+        # All SuSiE operations happen outside conversion context
         
         # Import susieR once for all operations
         try:
@@ -804,13 +804,13 @@ def finemap_region_batch_worker(batch_data):
         # Recreate database connection in worker process
         if db_params:
             try:
-                # Import Database locally to avoid circular imports in multiprocessing
-                from db import Database
-                db = Database(db_params['uri'], db_params['db_name'])
-                logger.info(f"[BATCH-{batch_id}] Database connection recreated in worker process")
+                # Import AnalysisHandler locally to avoid circular imports in multiprocessing
+                from db import AnalysisHandler
+                analysis_handler = AnalysisHandler(db_params['uri'], db_params['db_name'])
+                logger.info(f"[BATCH-{batch_id}] Analysis handler connection recreated in worker process")
             except Exception as db_e:
-                logger.error(f"[BATCH-{batch_id}] Error recreating database connection: {db_e}")
-                db = None
+                logger.error(f"[BATCH-{batch_id}] Error recreating analysis handler connection: {db_e}")
+                analysis_handler = None
     else:
         raise ValueError("No additional_params provided to worker - this should not happen")
     
@@ -892,7 +892,7 @@ def finemap_region_batch_worker(batch_data):
                     successful_regions += 1
                     
                     # Save to database if available
-                    if db and user_id and project_id:
+                    if analysis_handler and user_id and project_id:
                         try:
                             from utils import transform_credible_sets_to_locuszoom
                             # Determine lead variant
@@ -957,7 +957,7 @@ def finemap_region_batch_worker(batch_data):
                                 credible_set["completed_at"] = metadata["completed_at"]
                                 
                                 # Save individual credible set
-                                db.save_credible_set(user_id, project_id, credible_set)
+                                analysis_handler.save_credible_set(user_id, project_id, credible_set)
                             
                             logger.info(f"[BATCH-{batch_id}] Saved {len(credible_sets_data)} credible sets for {lead_variant_id}")
                             
