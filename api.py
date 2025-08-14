@@ -635,15 +635,50 @@ class ProjectsAPI(Resource):
     
     @token_required
     def delete(self, current_user_id):
-        """Delete a project"""
-        project_id = request.args.get('id')
-        if not project_id:
-            return {"error": "Project ID is required"}, 400
-        
-        success = self.db.delete_project(current_user_id, project_id)
-        if success:
-            return {"message": "Project deleted successfully"}, 200
-        return {"error": "Project not found or access denied"}, 404
+        """Delete project(s) - supports single or bulk deletion"""
+        try:
+            # Check if it's bulk deletion (JSON body with project_ids array)
+            if request.is_json and request.json:
+                data = request.json
+                project_ids = data.get('project_ids', [])
+                
+                if not project_ids or not isinstance(project_ids, list):
+                    return {"error": "project_ids array is required for bulk deletion"}, 400
+                
+                # Bulk deletion
+                result = self.db.bulk_delete_projects(current_user_id, project_ids)
+                if result and isinstance(result, dict):
+                    if result['success']:
+                        return {
+                            "message": f"Successfully deleted {result['deleted_count']} project(s)",
+                            "deleted_count": result['deleted_count'],
+                            "total_requested": result['total_requested']
+                        }, 200
+                    else:
+                        return {
+                            "message": f"Partially deleted {result['deleted_count']}/{result['total_requested']} project(s)",
+                            "deleted_count": result['deleted_count'],
+                            "total_requested": result['total_requested'],
+                            "errors": result['errors']
+                        }, 207  # Multi-status
+                else:
+                    return {"error": "Failed to delete projects"}, 500
+            
+            else:
+                # Single project deletion (query parameter)
+                project_id = request.args.get('id')
+                if not project_id:
+                    return {"error": "Project ID is required"}, 400
+                
+                result = self.db.delete_project(current_user_id, project_id)
+                if result and isinstance(result, dict) and result.get('success'):
+                    return {"message": "Project deleted successfully"}, 200
+                else:
+                    return {"error": "Project not found or access denied"}, 404
+                    
+        except Exception as e:
+            logger.error(f"Error deleting project(s): {str(e)}")
+            return {"error": f"Failed to delete project(s): {str(e)}"}, 500
 
 
 
