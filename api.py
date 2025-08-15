@@ -13,7 +13,7 @@ from flows import hypothesis_flow, analysis_pipeline_flow
 from run_deployment import invoke_enrichment_deployment
 from status_tracker import status_tracker, TaskState
 from prefect import flow
-from utils import allowed_file, transform_credible_sets_to_locuszoom
+from utils import allowed_file, convert_variants_to_object_array
 from loguru import logger
 from werkzeug.utils import secure_filename
 from utils import serialize_datetime_fields
@@ -564,23 +564,13 @@ class ProjectsAPI(Resource):
             total_variants_count = 0
             
             try:
-                credible_sets_raw = self.db.get_lead_variant_credible_sets(current_user_id, project["id"])
+                credible_sets_raw = self.db.get_credible_sets_for_project(current_user_id, project["id"])
                 if credible_sets_raw:
                     if isinstance(credible_sets_raw, list) and credible_sets_raw:
                         # Calculate totals from credible sets
-                        total_credible_sets_count = sum(len(cs["data"].get("credible_sets", [])) for cs in credible_sets_raw)
-                        total_variants_count = sum(
-                            len(credible_set.get("variants", [])) 
-                            for cs in credible_sets_raw 
-                            for credible_set in cs["data"].get("credible_sets", [])
-                        )
-                    elif not isinstance(credible_sets_raw, list):
-                        # Single result
-                        total_credible_sets_count = len(credible_sets_raw["data"].get("credible_sets", []))
-                        total_variants_count = sum(
-                            len(credible_set.get("variants", []))
-                            for credible_set in credible_sets_raw["data"].get("credible_sets", [])
-                        )
+                        total_credible_sets_count = len(credible_sets_raw) if credible_sets_raw else 0
+                        total_variants_count = sum(cs.get("variants_count", 0) for cs in credible_sets_raw) if credible_sets_raw else 0
+    
             except Exception as cs_e:
                 logger.warning(f"Could not load credible sets for project {project['id']}: {cs_e}")
             
@@ -916,21 +906,20 @@ class CredibleSetsAPI(Resource):
 
     @token_required
     def get(self, current_user_id):
-        """Get credible set details by lead variant ID"""
+        """Get credible set details by credible set ID or lead variant ID"""
         project_id = request.args.get('project_id')
-        lead_variant_id = request.args.get('lead_variant_id')
+        credible_set_id = request.args.get('credible_set_id')
         
         if not project_id:
             return {"error": "project_id is required"}, 400
         
-        if not lead_variant_id:
-            return {"error": "lead_variant_id is required"}, 400
+        if not credible_set_id:
+            return {"error": "Credible_set_id is required"}, 400
         
         try:
-            # Get the credible set for this specific lead variant
-            credible_set = self.db.get_credible_set_by_lead_variant(current_user_id, project_id, lead_variant_id)
+            credible_set = self.db.get_credible_set_by_id(current_user_id, project_id, credible_set_id)
             if not credible_set:
-                return {"message": "No credible set found for this lead variant"}, 404
+                return {"message": "No credible set found with this ID"}, 404
             
             # Extract variants data 
             variants_data = credible_set.get("variants_data", {})
@@ -938,9 +927,14 @@ class CredibleSetsAPI(Resource):
                 return {"message": "No variants data found for this credible set"}, 404
             
             variants = variants_data.get("data", {})
+            
+            # Convert from object-with-arrays format to array-of-objects format
+            variants_array = convert_variants_to_object_array(variants)
 
-            variants = serialize_datetime_fields(variants)
-            return {"variants": variants}, 200
+            variants_array = serialize_datetime_fields(variants_array)
+            return {
+                "variants": variants_array
+            }, 200
 
         except Exception as e:
             logger.error(f"Error fetching credible set: {str(e)}")

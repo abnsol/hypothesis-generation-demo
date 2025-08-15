@@ -290,6 +290,26 @@ class Database:
             logger.error(f"Error getting credible set by lead variant: {str(e)}")
             raise
 
+    def get_credible_set_by_id(self, user_id, project_id, credible_set_id):
+        """Get credible set data by credible set ID"""
+        try:
+            from bson import ObjectId
+            query = {
+                '_id': ObjectId(credible_set_id),
+                'user_id': user_id,
+                'project_id': project_id,
+                'type': 'credible_set'
+            }
+            
+            result = self.credible_sets_collection.find_one(query)
+            if result:
+                result['_id'] = str(result['_id'])
+                return result
+            return None
+        except Exception as e:
+            logger.error(f"Error getting credible set by ID: {str(e)}")
+            raise
+
     def create_enrich(self, user_id, project_id, variant, phenotype, causal_gene, go_terms, causal_graph):
         """Create enrichment entry with project references"""
         enrich_data = {
