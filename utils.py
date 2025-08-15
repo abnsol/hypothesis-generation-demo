@@ -177,3 +177,36 @@ def transform_credible_sets_to_locuszoom(credible_sets_data):
         },
         "lastPage": None
     }
+
+
+def convert_variants_to_object_array(variants_data):
+    """
+    Convert variants data from object-with-arrays format to array-of-objects format.
+    """
+    if not variants_data or not isinstance(variants_data, dict):
+        return []
+    
+    # Get all field names
+    field_names = list(variants_data.keys())
+    if not field_names:
+        return []
+    
+    # Get the length of arrays 
+    first_field = field_names[0]
+    if not isinstance(variants_data[first_field], list):
+        return []
+    
+    array_length = len(variants_data[first_field])
+    
+    # Convert to array of objects
+    result = []
+    for i in range(array_length):
+        variant_obj = {}
+        for field_name in field_names:
+            if isinstance(variants_data[field_name], list) and i < len(variants_data[field_name]):
+                variant_obj[field_name] = variants_data[field_name][i]
+            else:
+                variant_obj[field_name] = None
+        result.append(variant_obj)
+    
+    return result
