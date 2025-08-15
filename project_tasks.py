@@ -122,7 +122,7 @@ def get_project_with_full_data(db, user_id, project_id):
         credible_sets_data = []
         total_credible_sets_count = 0
         total_variants_count = 0
-        analysis_parameters = {}
+        analysis_parameters = project.get("analysis_parameters", {})
         
         try:
             credible_sets_data = db.get_credible_sets_for_project(user_id, project_id)
@@ -131,20 +131,6 @@ def get_project_with_full_data(db, user_id, project_id):
                 total_variants_count = sum(cs.get("variants_count", 0) for cs in credible_sets_data)
             else:
                 credible_sets_data = []
-            
-            # Extract analysis parameters from first credible set's metadata if available
-            if credible_sets_data and credible_sets_data[0].get("metadata"):
-                metadata = credible_sets_data[0]["metadata"]
-                analysis_parameters = {
-                    "population": metadata.get("population"),
-                    "ref_genome": metadata.get("ref_genome"),
-                    "finemap_window_kb": metadata.get("finemap_window_kb"),
-                    "coverage": metadata.get("coverage"),
-                    "min_abs_corr": metadata.get("min_abs_corr"),
-                    "maf_threshold": metadata.get("maf_threshold"),
-                    "seed": metadata.get("seed"),
-                    "L": metadata.get("L")
-                }
         except Exception as cs_e:
             logger.warning(f"Could not load credible sets for project {project_id}: {cs_e}")
             credible_sets_data = []
