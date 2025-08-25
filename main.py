@@ -11,6 +11,7 @@ from api import (
     EnrichAPI,
     HypothesisAPI, 
     BulkHypothesisDeleteAPI,
+    BulkProjectDeleteAPI,
     ChatAPI, 
     init_socket_handlers,
     ProjectsAPI,
@@ -106,10 +107,11 @@ def setup_api(config):
             "db": deps['db']
         }
     )
-    api.add_resource(ChatAPI, "/chat", resource_class_kwargs={"llm": deps['llm']})
+    api.add_resource(ChatAPI, "/chat", resource_class_kwargs={"llm": deps['llm'], "db": deps['db']})
     api.add_resource(BulkHypothesisDeleteAPI, "/hypothesis/delete",resource_class_kwargs={"db": deps['db']})
     # project-based workflow
     api.add_resource(ProjectsAPI, "/projects", resource_class_kwargs={"db": deps['db']})
+    api.add_resource(BulkProjectDeleteAPI, "/projects/delete", resource_class_kwargs={"db": deps['db']})
     api.add_resource(AnalysisPipelineAPI, "/analysis-pipeline", resource_class_kwargs={"db": deps['db']})
     api.add_resource(CredibleSetsAPI, "/credible-sets", resource_class_kwargs={"db": deps['db']})
     
