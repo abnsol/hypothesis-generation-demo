@@ -334,7 +334,7 @@ def run_cojo_per_chromosome(significant_df, plink_dir, output_dir, maf_threshold
                 combined_cojo_df = combined_cojo_df.set_index('ID')
             
             # Add demo variant rs1421085 for demonstration purposes
-            combined_cojo_df = append_demo_variant_rs1421085(combined_cojo_df)
+            # combined_cojo_df = append_demo_variant_rs1421085(combined_cojo_df)
             
             # Save combined results
             os.makedirs(output_dir, exist_ok=True)
@@ -876,20 +876,20 @@ def finemap_region(seed, sumstats, chr_num, lead_variant_position, window=2000,
                             logger.info(f"[FINEMAP] Chr{chr_num}:{lead_variant_position} - Credible set {cs_num}: {len(cs_subset)} variants, PIP range: {cs_subset['PIP'].min():.6f}-{cs_subset['PIP'].max():.6f}")
                         
                         # Add demo variant if applicable
-                        demo_credible_set = create_demo_credible_set_rs1421085(chr_num, lead_variant_position)
-                        if demo_credible_set is not None:
-                            # Check if rs1421085 is not already in the credible sets
-                            if 'rs1421085' not in credible_snps.index:
-                                # Assign it to the next credible set number
-                                next_cs_num = credible_snps['cs'].max() + 1 if len(credible_snps) > 0 else 1
-                                demo_credible_set['cs'] = next_cs_num
-                                demo_credible_set['credible_set'] = next_cs_num
+                        # demo_credible_set = create_demo_credible_set_rs1421085(chr_num, lead_variant_position)
+                        # if demo_credible_set is not None:
+                        #     # Check if rs1421085 is not already in the credible sets
+                        #     if 'rs1421085' not in credible_snps.index:
+                        #         # Assign it to the next credible set number
+                        #         next_cs_num = credible_snps['cs'].max() + 1 if len(credible_snps) > 0 else 1
+                        #         demo_credible_set['cs'] = next_cs_num
+                        #         demo_credible_set['credible_set'] = next_cs_num
                                 
-                                # Combine with existing credible sets
-                                credible_snps = pd.concat([credible_snps, demo_credible_set])
-                                logger.info(f"[DEMO] Added rs1421085 to credible sets as set {next_cs_num}")
-                            else:
-                                logger.info(f"[DEMO] rs1421085 already present in credible sets")
+                        #         # Combine with existing credible sets
+                        #         credible_snps = pd.concat([credible_snps, demo_credible_set])
+                        #         logger.info(f"[DEMO] Added rs1421085 to credible sets as set {next_cs_num}")
+                        #     else:
+                        #         logger.info(f"[DEMO] rs1421085 already present in credible sets")
                         
                         # Format for LocusZoom and return
                         return credible_snps 
@@ -906,9 +906,9 @@ def finemap_region(seed, sumstats, chr_num, lead_variant_position, window=2000,
         logger.warning(f"[FINEMAP] Chr{chr_num}:{lead_variant_position} - No credible sets identified, checking for demo variant")
         
         # Check if this region should include the demo variant rs1421085
-        demo_credible_set = create_demo_credible_set_rs1421085(chr_num, lead_variant_position)
-        if demo_credible_set is not None:
-            return demo_credible_set
+        # demo_credible_set = create_demo_credible_set_rs1421085(chr_num, lead_variant_position)
+        # if demo_credible_set is not None:
+        #     return demo_credible_set
             
         return None
             
@@ -916,10 +916,10 @@ def finemap_region(seed, sumstats, chr_num, lead_variant_position, window=2000,
         logger.error(f"[FINEMAP] Error in fine-mapping chr{chr_num}:{lead_variant_position}: {str(e)}")
         
         # Try to return demo variant even if fine-mapping failed
-        demo_credible_set = create_demo_credible_set_rs1421085(chr_num, lead_variant_position)
-        if demo_credible_set is not None:
-            logger.info(f"[FINEMAP] Returning demo credible set for failed region chr{chr_num}:{lead_variant_position}")
-            return demo_credible_set
+        # demo_credible_set = create_demo_credible_set_rs1421085(chr_num, lead_variant_position)
+        # if demo_credible_set is not None:
+        #     logger.info(f"[FINEMAP] Returning demo credible set for failed region chr{chr_num}:{lead_variant_position}")
+        #     return demo_credible_set
             
         return None
 
@@ -1250,5 +1250,26 @@ def cleanup_sumstats_file(temp_path):
             logger.warning(f"[MEMORY] Temporary file not found for cleanup: {temp_path}")
     except Exception as e:
         logger.error(f"[MEMORY] Error cleaning up temporary file {temp_path}: {e}")
+
+def create_guaranteed_demo_credible_set():
+    """Create rs1421085 demo credible set that always appears"""
+    logger.info("[DEMO] Creating guaranteed demo credible set with rs1421085")
+    
+    demo_variant_data = {
+        'CHR': [int(16)], 'BP': [int(53767042)], 'POS': [int(53767042)],
+        'ID': ['rs1421085'], 'RS_ID': ['rs1421085'],
+        'A2': ['T'], 'A1': ['C'], 'REF': ['T'], 'ALT': ['C'], 
+        'FRQ': [float(0.42)], 'AF': [float(0.42)],
+        'BETA': [float(0.39)], 'SE': [float(0.013)], 
+        'Z': [float(30.0)], 'P': [float(2.4e-82)], 'N': [int(681275)],
+        'PIP': [float(0.95)], 'cs': [int(999)], 
+        'region_id': ['demo_chr16:53767042'], 'region_chr': [int(16)],
+        'region_center': [int(53767042)], 'converged': [True],
+        'credible_set': [int(999)]
+    }
+    
+    demo_df = pd.DataFrame(demo_variant_data).set_index('ID')
+    logger.info("[DEMO] Created guaranteed demo credible set 999 with rs1421085")
+    return demo_df
 
 
