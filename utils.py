@@ -160,12 +160,36 @@ def transform_credible_sets_to_locuszoom(credible_sets_data):
                         "ref_allele": [], "ref_allele_freq": [], "variant": [], 
                         "posterior_prob": [], "is_member": [], "rs_id": []}, "lastPage": None}
     
+    # Clean data before conversion - handle NaN and infinite values
+    df = df.copy()
+    
+    # Replace infinite values with NaN, then fill NaN with reasonable defaults
+    df = df.replace([np.inf, -np.inf], np.nan)
+    
+    # Fill NaN values with reasonable defaults for each column type
+    if 'BETA' in df.columns:
+        df['BETA'] = df['BETA'].fillna(0.0)
+    if 'CHR' in df.columns:
+        df['CHR'] = df['CHR'].fillna(1)  # Default to chromosome 1
+    if 'P' in df.columns:
+        df['P'] = df['P'].fillna(1.0)  # Default to non-significant p-value
+    if 'BP' in df.columns:
+        df['BP'] = df['BP'].fillna(0)  # Default position
+    if 'FRQ' in df.columns:
+        df['FRQ'] = df['FRQ'].fillna(0.5)  # Default frequency
+    if 'PIP' in df.columns:
+        df['PIP'] = df['PIP'].fillna(0.0)  # Default to no posterior probability
+    if 'A1' in df.columns:
+        df['A1'] = df['A1'].fillna('A')  # Default allele
+    if 'A2' in df.columns:
+        df['A2'] = df['A2'].fillna('T')  # Default allele
+    
     # Create LocusZoom format
     return {
         "data": {
             "beta": df['BETA'].astype(float).tolist(),
             "chromosome": df['CHR'].astype(int).tolist(), 
-            "log_pvalue": (-np.log10(df['P'].astype(float))).tolist(),
+            "log_pvalue": (-np.log10(df['P'].astype(float).clip(lower=1e-300))).tolist(),  # Clip to avoid log(0)
             "position": df['BP'].astype(int).tolist(),
             "ref_allele": df['A2'].astype(str).tolist(),
             "minor_allele": df['A1'].astype(str).tolist(),
