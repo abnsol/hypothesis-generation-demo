@@ -46,7 +46,7 @@ tflink:
 tadmap:
  path: tadmap
  nodes: True
-   edges: True
+ edges: True
 
 gtex_eqtl:
   path: gtex/eqtl
@@ -187,4 +187,4 @@ experimental_factor_ontology:
 brenda_tissue_ontology:
  path: brenda_tissue_ontology
  nodes: True
-   edges: True
+ edges: True
