@@ -329,11 +329,20 @@ def init_socket_handlers(db_instance):
         try:
             logger.info("Client attempting to connect")
             client_id = request.sid
-
+            
+            # Log authentication data for debugging
+            if auth:
+                logger.info(f"Auth data received: {type(auth)}")
+            
+            # Check for authorization header
+            auth_header = request.headers.get('Authorization')
+            if auth_header:
+                logger.info(f"Authorization header present: {auth_header[:20]}...")
+            
             logger.info(f"Client connected: {client_id}")
             
-            # Set a reasonable timeout for all connections
-            inactivity_timer = Timer(300, lambda: socketio.server.disconnect(client_id))
+            # Set a reasonable timeout for all connections (extended for better UX)
+            inactivity_timer = Timer(600, lambda: socketio.server.disconnect(client_id))  # 10 minutes
             inactivity_timer.start()
             
             # Store the timer for potential cleanup

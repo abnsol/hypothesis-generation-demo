@@ -28,7 +28,7 @@ def token_required(f):
             data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
             current_user_id = data['user_id']
         except Exception as e:
-            logging.error(f"Error docodcing token: {e}")
+            logging.error(f"Error decoding token: {e}")
             return {'message': 'Token is invalid!'}, 403
         
         if 'hypothesis_id' in kwargs:
