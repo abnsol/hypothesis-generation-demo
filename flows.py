@@ -5,7 +5,8 @@ from flask import json
 from loguru import logger
 from prefect import flow
 from status_tracker import TaskState
-import multiprocessing as mp
+import multiprocessing as mp 
+from mock_graph import get_mock_causal_graph
 
 from tasks import (
     check_enrich, create_enrich_data, get_candidate_genes, predict_causal_gene, 
@@ -127,7 +128,8 @@ def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, hypotheses
     variant_id = enrich_data['variant']
     phenotype = enrich_data['phenotype']
     coexpressed_gene_names = go_term[0]["genes"]
-    causal_graph = enrich_data['causal_graph']
+    # causal_graph = enrich_data['causal_graph']
+    causal_graph = get_mock_causal_graph()
 
     logger.info(f"Enrich data: {enrich_data}")
 

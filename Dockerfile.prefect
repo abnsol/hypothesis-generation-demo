@@ -10,15 +10,30 @@ RUN pip install --upgrade pip setuptools wheel
 # Install rust
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
-ENV PATH="/root/.cargo/bin:${PATH}"
+ENV PATH="/root/.cargo/bin:${PATH}" 
+
+# Install uv (fast dependency manager)
+RUN pip install uv
 
 # Set the working directory in the container
 WORKDIR /app
 
-# Install the Python dependencies
-COPY requirements.txt /app/requirements.txt
-RUN pip install -r requirements.txt
+COPY pyproject.toml /app/
 
+# # Install the Python dependencies
+# COPY requirements.txt /app/requirements.txt
+# RUN pip install -r requirements.txt
+
+# Solve this error 
+#  => CACHED [prefect-service  5/11] WORKDIR /app                                                                                                  0.0s
+#  => ERROR [prefect-service  6/11] COPY requirements.txt /app/requirements.txt                                                                    0.0s
+# ------
+#  > [prefect-service  6/11] COPY requirements.txt /app/requirements.txt:
+# ------
+# failed to solve: failed to compute cache key: failed to calculate checksum of ref 980c39ae-7f2f-4868-8c0c-84366613a114::115qbkl6j4t235n3g4dyknb4b: "/requirements.txt": not found
+
+# Install dependencies defined in pyproject.toml
+RUN uv pip install --system .
 
 # Install Prefect and other dependencies
 RUN pip install --upgrade pip \
