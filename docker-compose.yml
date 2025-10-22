@@ -1,6 +1,26 @@
 version: '3.8'
 
 services:
+  redis:
+    image: redis:7
+    command: >
+      redis-server
+        --appendonly yes
+        --appendfsync everysec
+        --auto-aof-rewrite-percentage 100
+        --auto-aof-rewrite-min-size 64mb
+        --loglevel warning
+    ports:
+      - "6379:6379"  
+    volumes:
+      - redis-data:/data
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   mongo:
     image: mongo:latest
@@ -33,6 +53,7 @@ services:
     environment:
       - FLASK_ENV=development
       - PREFECT_API_URL=http://prefect-service:4200/api
+      - REDIS_URL=redis://redis:6379/0
     env_file:
       - .env
     volumes:
@@ -41,6 +62,7 @@ services:
       # - /mnt/hdd_1/rediet/hypothesis-generation-demo/data:/app/data/external_data  
     depends_on:
       - mongo
+      - redis 
       # - prolog-service
       - prefect-service
     command: >
@@ -92,15 +114,19 @@ services:
       "
     environment:
     - PREFECT_API_URL=http://prefect-service:4200/api
+    - REDIS_URL=redis://redis:6379/0
     depends_on:
       prefect-service:
         condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - app_network
 
 volumes:
   mongo-data:
   prefect-data:
+  redis-data: 
 
 networks:
   app_network:
