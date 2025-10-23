@@ -45,7 +45,7 @@ class RedisStatusCache:
         self.r.delete(self._history_key(hyp_id))
         self.r.delete(self._latest_key(hyp_id))
         self.r.srem("hyp:inprogress:set", hyp_id)
-        self.r.sadd("hyp:persisted:set", hyp_id)
+        self.r.sadd("hyp:persisted:set", hyp_id) 
 
     def is_persisted(self, hyp_id: str) -> bool:
         return bool(self.r.sismember("hyp:persisted:set", hyp_id))

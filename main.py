@@ -83,7 +83,7 @@ def setup_api(config):
 
     # Recover in-progress tasks on startup
     try:
-        status_tracker.recover_from_cache(mark_interrupted=True)
+        status_tracker.recover_from_cache()
         logger.info("Startup recovery completed.")
     except Exception as e:
         logger.error(f"Startup recovery failed: {e}")
