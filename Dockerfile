@@ -66,30 +66,17 @@ RUN Rscript -e " \
 RUN Rscript -e " \
     options(repos = c(CRAN = 'https://cloud.r-project.org/')); \
     cat('=== INSTALLING susieR 0.12.35 ===\n'); \
-    \
-    # Download specific version from CRAN archive \
-    cat('Downloading susieR 0.12.35 from CRAN archive...\n'); \
     download.file('https://cran.r-project.org/src/contrib/Archive/susieR/susieR_0.12.35.tar.gz', '/tmp/susieR_0.12.35.tar.gz'); \
-    \
-    # Install dependencies first \
-    cat('Installing dependencies...\n'); \
     install.packages(c('mixsqp', 'reshape', 'ggplot2', 'Matrix', 'crayon', 'matrixStats')); \
-    \
-    # Install susieR from source \
-    cat('Installing susieR from source...\n'); \
     install.packages('/tmp/susieR_0.12.35.tar.gz', repos=NULL, type='source'); \
-    \
-    # Cleanup downloaded file \
     unlink('/tmp/susieR_0.12.35.tar.gz'); \
-    \
-    # Verify installation \
     susie_version <- packageVersion('susieR'); \
     cat('Final susieR version:', as.character(susie_version), '\n'); \
     if (as.character(susie_version) == '0.12.35') { \
-        cat('SUCCESS: susieR 0.12.35 installed correctly!\n'); \
+    cat('SUCCESS: susieR 0.12.35 installed correctly!\n'); \
     } else { \
-        cat('ERROR: Expected 0.12.35 but got', as.character(susie_version), '\n'); \
-        quit(status=1); \
+    cat('ERROR: Expected 0.12.35 but got', as.character(susie_version), '\n'); \
+    quit(status=1); \
     }; \
     "
 
@@ -100,18 +87,14 @@ RUN Rscript -e " \
     BiocManager::install(c('dplyr', 'readr', 'data.table', 'Rfast', 'devtools'), ask=FALSE, update=FALSE); \
     BiocManager::install(c('MungeSumstats'), ask=FALSE, update=FALSE); \
     BiocManager::install(c('SNPlocs.Hsapiens.dbSNP155.GRCh37', 'SNPlocs.Hsapiens.dbSNP155.GRCh38'), ask=FALSE, update=FALSE); \
-    BiocManager::install(c( \
-        'BSgenome.Hsapiens.UCSC.hg19', \
-        'BSgenome.Hsapiens.UCSC.hg38', \
-        'BSgenome.Hsapiens.1000genomes.hs37d5' \
-    ), ask=FALSE, update=FALSE); \
+    BiocManager::install(c('BSgenome.Hsapiens.UCSC.hg19', 'BSgenome.Hsapiens.UCSC.hg38', 'BSgenome.Hsapiens.1000genomes.hs37d5'), ask=FALSE, update=FALSE); \
     "
 
 # Install vautils from GitHub
 RUN Rscript -e " \
     library(devtools); \
     withr::with_envvar(c('GITHUB_PAT' = ''), { \
-        install_github('oyhel/vautils', upgrade='never') \
+    install_github('oyhel/vautils', upgrade='never') \
     }) \
     "
 
@@ -123,14 +106,29 @@ RUN Rscript -e " \
     cat('R version:', R.version.string, '\n'); \
     "
 
-# Install uv
-RUN wget -qO- https://astral.sh/uv/install.sh | sh
+# Create a virtualenv outside /app so bind mounts don't hide it
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
 
-# Install Python dependencies
-COPY pyproject.toml .
-RUN uv sync
+# Preinstall CPU-only PyTorch to avoid CUDA wheels
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision torchaudio
 
-# Copy application
-COPY . .
+# Copy only pyproject first to leverage cache for deps
+COPY pyproject.toml /app/pyproject.toml
+
+# Generate requirements.txt from pyproject and install remaining deps
+# Python 3.10 doesn't have tomllib; use tomli.
+RUN pip install tomli && python - <<'PY'
+import tomli, pathlib
+data = tomli.loads(pathlib.Path("pyproject.toml").read_text())
+deps = data.get("project", {}).get("dependencies", [])
+pathlib.Path("requirements.txt").write_text("\n".join(deps) + "\n")
+print("Generated requirements.txt with", len(deps), "deps")
+PY
+RUN pip install -r requirements.txt
+
+# Copy application last
+COPY . /app
 
 EXPOSE 5000

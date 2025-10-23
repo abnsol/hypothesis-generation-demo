@@ -1,0 +1,14 @@
+prefect>=3
+pymongo
+redis>=5.0.0,<7.0.0
+python-dotenv
+loguru
+requests
+flask
+flask-restful
+flask-cors
+flask-socketio
+python-socketio
+eventlet
+PyYAML
+tzlocal

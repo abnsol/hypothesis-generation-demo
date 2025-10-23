@@ -6,7 +6,7 @@ from db import (
     UserHandler, ProjectHandler, FileHandler, AnalysisHandler,
     EnrichmentHandler, HypothesisHandler, SummaryHandler, TaskHandler, 
 )
-from .db.state_cache.stateCache import RedisStatusCache
+from db.state_cache.stateCache import RedisStatusCache
 
 class Config:
     """Centralized configuration for the application"""

@@ -1,55 +1,87 @@
-# Use an official Python runtime as a parent image
-FROM python:3.10-bookworm
+# # Use an official Python runtime as a parent image
+# FROM python:3.13 
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y build-essential curl
+# # Install system dependencies
+# RUN apt-get update && apt-get install -y build-essential curl
 
-# Install the outlines library
-RUN pip install --upgrade pip setuptools wheel
+# # Install the outlines library
+# RUN pip install --upgrade pip setuptools wheel
 
-# Install rust
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+# # Install rust
+# RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
-ENV PATH="/root/.cargo/bin:${PATH}" 
+# ENV PATH="/root/.cargo/bin:${PATH}" 
 
-# Install uv (fast dependency manager)
-RUN pip install uv
+# # Set the working directory in the container
+# WORKDIR /app
 
-# Set the working directory in the container
+# COPY pyproject.toml /app/pyproject.toml
+
+# # # Install the Python dependencies
+# # COPY requirements.txt /app/requirements.txt
+# # RUN pip install -r requirements.txt
+
+# # Solve this error 
+# #  => CACHED [prefect-service  5/11] WORKDIR /app                                                                                                  0.0s
+# #  => ERROR [prefect-service  6/11] COPY requirements.txt /app/requirements.txt                                                                    0.0s
+# # ------
+
+
+# #  > [prefect-service  6/11] COPY requirements.txt /app/requirements.txt:
+# # ------
+# # failed to solve: failed to compute cache key: failed to calculate checksum of ref 980c39ae-7f2f-4868-8c0c-84366613a114::115qbkl6j4t235n3g4dyknb4b: "/requirements.txt": not found
+
+# RUN pip install . 
+
+# # then copy the rest of the resources
+# COPY . /app
+
+# # Install Prefect and other dependencies
+# RUN pip install --upgrade pip \
+#     && pip install -U prefect 
+
+# # Install OpenCravat
+# RUN pip install open-cravat
+
+# # Install the annotators
+# RUN oc module install-base && oc module install clinvar cosmic --yes
+
+# # Copy application code (needed for workers to execute flows)
+# # COPY . /app
+
+# # Expose port 4200 for Prefect server
+# EXPOSE 4200
+
+# # Default to starting Prefect server, but can be overridden for workers
+# CMD ["prefect", "server", "start", "--host", "0.0.0.0"]
+
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-COPY pyproject.toml /app/
+# Install only what's needed for the Prefect service
+COPY requirements-prefect.txt /app/requirements.txt
+RUN pip install --upgrade pip setuptools wheel \
+    # && pip install --no-cache-dir -r /app/requirements.txt
+    && pip install -r /app/requirements.txt
 
-# # Install the Python dependencies
-# COPY requirements.txt /app/requirements.txt
-# RUN pip install -r requirements.txt
-
-# Solve this error 
-#  => CACHED [prefect-service  5/11] WORKDIR /app                                                                                                  0.0s
-#  => ERROR [prefect-service  6/11] COPY requirements.txt /app/requirements.txt                                                                    0.0s
-# ------
-#  > [prefect-service  6/11] COPY requirements.txt /app/requirements.txt:
-# ------
-# failed to solve: failed to compute cache key: failed to calculate checksum of ref 980c39ae-7f2f-4868-8c0c-84366613a114::115qbkl6j4t235n3g4dyknb4b: "/requirements.txt": not found
-
-# Install dependencies defined in pyproject.toml
-RUN uv pip install --system .
-
-# Install Prefect and other dependencies
-RUN pip install --upgrade pip \
-    && pip install -U prefect 
-
-# Install OpenCravat
-RUN pip install open-cravat
-
-# Install the annotators
-RUN oc module install-base && oc module install clinvar cosmic --yes
-
-# Copy application code (needed for workers to execute flows)
+# Copy application code so workers/flows can import it if needed
 COPY . /app
 
-# Expose port 4200 for Prefect server
+# # Optional: OpenCravat (keep only if Prefect service needs it)
+# RUN pip install --no-cache-dir open-cravat \
+#     && oc module install-base && oc module install clinvar cosmic --yes
+RUN pip install open-cravat \
+    && oc module install-base && oc module install clinvar cosmic --yes
+
 EXPOSE 4200
 
-# Default to starting Prefect server, but can be overridden for workers
 CMD ["prefect", "server", "start", "--host", "0.0.0.0"]
