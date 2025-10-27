@@ -11,6 +11,9 @@ import openai
 import scipy
 import os
 
+import google.generativeai as genai 
+import re 
+
 def split_text(text: str, n=100, character=" ") -> List[str]:
     """Split the text every ``n``-th occurrence of ``character``"""
     text = text.split(character)
@@ -36,10 +39,11 @@ class Response(BaseModel):
 
 class LLM:
 
-    def __init__(self, llm="gpt4", temperature=0.0):
+    def __init__(self, llm="gemini", temperature=0.0):
 
         
         self.temperature = temperature
+        self.llm_type = llm
         if llm == "gpt4":
             #Check that the openai key is available
             try:
@@ -56,6 +60,37 @@ class LLM:
                 self.llm = Anthropic(api_key=anthropic_api_key, temperature=temperature, model="claude-3-5-sonnet-20240620")
             except KeyError:
                 raise ValueError("Please set the ANTHROPIC_API_KEY environment variable")
+        elif llm == "gemini":
+            google_api_key = os.getenv("GEMINI_API_KEY")
+            if not google_api_key:
+                raise ValueError("Please set the GEMINI_API_KEY environment variable")
+            genai.configure(api_key=google_api_key)
+            self.llm = genai.GenerativeModel("gemini-2.5-flash")
+        else:
+            raise ValueError(f"Unsupported LLM: {llm}")
+    
+    def _chat(self, messages: List[ChatMessage]) -> str:
+        if isinstance(self.llm, OpenAI) or isinstance(self.llm, Anthropic):
+            return self.llm.chat(messages).message.content
+        elif self.llm_type == "gemini":
+            full_prompt = "\n".join(
+                [f"{m.role.upper()}: {m.content}" for m in messages]
+            )
+            full_prompt += "\n\nPlease return *only* a JSON object and nothing else."
+            response = self.llm.generate_content(full_prompt)
+            raw = response.text
+
+            m = re.search(r"(\{.*\})", raw, re.DOTALL)
+            if not m:
+                raw = raw.strip("`").replace("json\n", "").strip()
+                m = re.search(r"(\[.*?\])", raw, re.DOTALL)
+                if not m:
+                    raise ValueError(
+                        f"Could not find a JSON object in the model output:\n{raw!r}"
+                    )
+            return m.group(1)
+        else:
+            raise NotImplementedError("Unsupported LLM interface")
     
     
     def predict_casual_gene(self, phenotype, genes, 
@@ -103,13 +138,15 @@ class LLM:
                         ChatMessage(role="system", content=system_prompt),
                         ChatMessage(role="user", content=query),
                     ]
-        response = self.llm.chat(messages).message.content
+        # response = self.llm.chat(messages).message.content
+        response = self._chat(messages)
         print(f"LLM Response: {response}")
         try:
             response = json.loads(response)
         except:
             # retry
-            response = self.llm.chat(messages)
+            # response = self.llm.chat(messages)
+            response = self._chat(messages)
             response = json.loads(response)
         return response
         

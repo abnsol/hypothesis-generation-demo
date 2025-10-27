@@ -14,6 +14,8 @@ from api import (
     init_socket_handlers,
     ProjectsAPI,
     AnalysisPipelineAPI,
+    SignupAPI,
+    LoginAPI,
 )
 from dotenv import load_dotenv
 import os
@@ -96,6 +98,8 @@ def setup_api(config):
 
 
     # Setup API endpoints with dependencies
+    api.add_resource(SignupAPI, "/signup", resource_class_kwargs={"users": deps['users']})
+    api.add_resource(LoginAPI, "/login", resource_class_kwargs={"users": deps['users']})
     api.add_resource(EnrichAPI, "/enrich", 
         resource_class_kwargs={
             "enrichr": deps['enrichr'], 

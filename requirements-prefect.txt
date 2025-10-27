@@ -12,3 +12,4 @@ python-socketio
 eventlet
 PyYAML
 tzlocal
+google-generativeai

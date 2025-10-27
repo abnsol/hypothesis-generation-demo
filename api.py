@@ -17,6 +17,64 @@ from utils import allowed_file, transform_credible_sets_to_locuszoom
 from loguru import logger
 from werkzeug.utils import secure_filename
 from utils import serialize_datetime_fields
+import jwt
+from datetime import timedelta
+import os
+
+
+class SignupAPI(Resource):
+    def __init__(self, users):
+        self.users = users
+
+    def post(self):
+        try:
+            data = request.get_json() or {}
+            email = (data.get('email') or '').strip().lower()
+            password = data.get('password') or ''
+
+            if not email or not password:
+                return {"message": "email and password are required"}, 400
+
+            return self.users.create_user(email, password)
+        except Exception as e:
+            logger.error(f"Signup error: {e}")
+            return {"message": "Internal server error"}, 500
+
+
+class LoginAPI(Resource):
+    def __init__(self, users):
+        self.users = users
+
+    def post(self):
+        try:
+            data = request.get_json() or {}
+            email = (data.get('email') or '').strip().lower()
+            password = data.get('password') or ''
+
+            if not email or not password:
+                return {"message": "email and password are required"}, 400
+
+            result, status = self.users.verify_user(email, password)
+            if status != 200:
+                return result, status
+
+            # Issue JWT matching our token_required decorator expectations
+            jwt_secret = os.getenv('JWT_SECRET')
+            if not jwt_secret:
+                logger.error("JWT_SECRET not set in environment")
+                return {"message": "Server misconfiguration: JWT secret missing"}, 500
+
+            payload = {
+                'user_id': result['user_id'],
+                'email': email,
+                'exp': (datetime.utcnow() + timedelta(days=7))
+            }
+            token = jwt.encode(payload, jwt_secret, algorithm='HS256')
+
+            return {"token": token, "user_id": result['user_id']}, 200
+        except Exception as e:
+            logger.error(f"Login error: {e}")
+            return {"message": "Internal server error"}, 500
 
 
 class EnrichAPI(Resource):

@@ -9,6 +9,8 @@ class TaskState(Enum):
 
 class StatusTracker:
     _instance = None
+    _task_handler = None
+    _cache = None
     
     def __new__(cls):
         if cls._instance is None:
@@ -70,10 +72,10 @@ class StatusTracker:
     def get_history(self, hypothesis_id):
         """Get complete task history from memory and DB without duplicates"""
         redis_history = self._cache.get_history(hypothesis_id) or []
-        db_history = self._task_handler.get_task_history(hypothesis_id) if hypothesis_id in self.completed_hypotheses else []
+        db_history = self._task_handler.get_task_history(hypothesis_id) if self._cache.is_persisted(hypothesis_id) else []
         
         # Combine histories
-        combined_history = redis_history + db_history
+        combined_history = redis_history + db_history 
         
         if not combined_history:
             return []
@@ -155,7 +157,7 @@ class StatusTracker:
     def recover_from_cache(self):
         """startup recover: for each in-progress hypothesis in Redis, persist its history to DB and clear."""
         ids = self._cache.list_inprogress()
-        for hyp_id in ids:
+        for idx,hyp_id in enumerate(ids):
             latest = self._cache.get_latest(hyp_id)
             if latest:
                 latest["timestamp"] = latest.get("timestamp", datetime.now(timezone.utc).isoformat(timespec='milliseconds') + "Z")

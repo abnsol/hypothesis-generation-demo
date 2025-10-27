@@ -31,6 +31,7 @@ from prefect.task_runners import ThreadPoolTaskRunner
 
 from utils import emit_task_update
 from config import Config, create_dependencies
+from status_tracker import status_tracker 
 
 ### Enrichment Flow
 @flow(log_prints=True, persist_result=False, task_runner=ThreadPoolTaskRunner(max_workers=4))
@@ -41,11 +42,14 @@ def enrichment_flow(current_user_id, phenotype, variant, hypothesis_id, project_
     # Initialize dependencies from environment variables
     config = Config.from_env()
     deps = create_dependencies(config)
-    
+
     enrichr = deps['enrichr']
     llm = deps['llm']
     prolog_query = deps['prolog_query']
     hypotheses = deps['hypotheses']
+    
+    # initialize the status tracker in the prefect deployment process
+    status_tracker.initialize(deps['tasks'], deps['status_cache'])
     
     try:
         logger.info(f"Running project-based enrichment for project {project_id}, variant {variant}")
@@ -111,6 +115,9 @@ def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, hypotheses
     # Initialize dependencies from environment variables for enrichment handler
     config = Config.from_env()
     deps = create_dependencies(config)
+    
+    # initialize the status tracker in the prefect deployment process
+    status_tracker.initialize(deps['tasks'], deps['status_cache'])
     enrichment = deps['enrichment']
     
     hypothesis = check_hypothesis(hypotheses, current_user_id, enrich_id, go_id, hypothesis_id)
