@@ -887,7 +887,11 @@ def finemap_region_batch_worker(batch_data):
     failed_regions = 0
 
     # Producer Thread
-    def producer(successful_regions, failed_regions):
+    def producer(successful_regions, failed_regions): 
+
+        # reactivate converters in this thread 
+        pandas2ri.activate()
+        numpy2ri.activate()
 
         # Process regions with shared R session
         for region_idx, region in enumerate(region_batch):
@@ -898,20 +902,20 @@ def finemap_region_batch_worker(batch_data):
             logger.info(f"[BATCH-{batch_id}] Running fine-mapping for {region_id} with shared R session")
             logger.info(f"[BATCH-{batch_id}] Producer processing {region_id}")
             
-            # Call finemap_region directly without additional conversion context
-            # The function handles its own conversion context internally
+            # Call finemap_region directly with additional conversion context
             try:
-                result = finemap_region(
-                    seed=seed,
-                    sumstats=sumstats_data,
-                    chr_num=region['chr'],
-                    lead_variant_position=region['position'],
-                    window=window,
-                    population=population,
-                    L=L,
-                    coverage=coverage,
-                    min_abs_corr=min_abs_corr
-                )
+                with localconverter(default_converter + pandas2ri.converter + numpy2ri.converter):
+                    result = finemap_region(
+                        seed=seed,
+                        sumstats=sumstats_data,
+                        chr_num=region['chr'],
+                        lead_variant_position=region['position'],
+                        window=window,
+                        population=population,
+                        L=L,
+                        coverage=coverage,
+                        min_abs_corr=min_abs_corr
+                    )
 
                 if result is not None and len(result) > 0:
                     # Add batch and region metadata
@@ -928,9 +932,11 @@ def finemap_region_batch_worker(batch_data):
                 pc_queue.put((region, None))
         
         # Finally add singal to indicate end of a queue
-        pc_queue.put(EndofQueue)
-
-
+        try:
+            pc_queue.put(EndofQueue, timeout=2)
+        except Exception:
+            logger.warning(f"[BATCH-{batch_id}] Could not signal EndofQueue")
+            
     #Consumer Thread        
     def consumer(successful_regions, failed_regions):
             while True:
