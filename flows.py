@@ -6,7 +6,7 @@ from loguru import logger
 from prefect import flow
 from status_tracker import TaskState
 import multiprocessing as mp
-
+from mock_graph import get_mock_causal_graph
 from tasks import (
     check_enrich, create_enrich_data, get_candidate_genes, predict_causal_gene, 
     get_relevant_gene_proof, retry_predict_causal_gene, retry_get_relevant_gene_proof,
@@ -27,9 +27,27 @@ from project_tasks import (
 import pandas as pd
 from datetime import datetime, timezone
 from prefect.task_runners import ThreadPoolTaskRunner
+"""
+Dynamic task runner selection:
+- Prefer DaskTaskRunner if prefect-dask is installed and USE_DASK env var is truthy.
+- Otherwise fall back to ThreadPoolTaskRunner to avoid heavy dependency and long builds.
+"""
+try:
+    from prefect_dask import DaskTaskRunner as _DaskTaskRunner
+except Exception:
+    _DaskTaskRunner = None
+
+def _choose_task_runner():
+    use_dask = os.getenv("USE_DASK", "0").lower() in ("1", "true", "yes")
+    if use_dask and _DaskTaskRunner is not None:
+        logger.info("[FLOW] Using DaskTaskRunner (prefect-dask detected and USE_DASK=true)")
+        return _DaskTaskRunner(cluster_kwargs={"n_workers": 4, "threads_per_worker": 1})
+    logger.info("[FLOW] Using ThreadPoolTaskRunner (prefect-dask missing or USE_DASK=false)")
+    return ThreadPoolTaskRunner(max_workers=4)
 
 from utils import emit_task_update
-from config import Config, create_dependencies
+from config import Config
+from db import EnrichmentHandler
 
 ### Enrichment Flow
 @flow(log_prints=True, persist_result=False, task_runner=ThreadPoolTaskRunner(max_workers=4))
@@ -45,6 +63,8 @@ def enrichment_flow(current_user_id, phenotype, variant, hypothesis_id, project_
     llm = deps['llm']
     prolog_query = deps['prolog_query']
     hypotheses = deps['hypotheses']
+    from status_tracker import status_tracker
+    status_tracker.initialize(deps['tasks'])
     
     try:
         logger.info(f"Running project-based enrichment for project {project_id}, variant {variant}")
@@ -59,6 +79,7 @@ def enrichment_flow(current_user_id, phenotype, variant, hypothesis_id, project_
         # Run enrichment analysis pipeline
         candidate_genes = get_candidate_genes.submit(prolog_query, variant, hypothesis_id).result()
         causal_gene = predict_causal_gene.submit(llm, phenotype, candidate_genes, hypothesis_id).result()
+        print("CAUSAL GENE",causal_gene)
         causal_graph, proof = get_relevant_gene_proof.submit(prolog_query, variant, causal_gene, hypothesis_id).result()
 
         if causal_graph is None:
@@ -107,10 +128,11 @@ def enrichment_flow(current_user_id, phenotype, variant, hypothesis_id, project_
 ### Hypothesis Flow
 @flow(log_prints=True)
 def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, hypotheses, prolog_query, llm):
-    # Initialize dependencies from environment variables for enrichment handler
+    # Initialize only the DB enrichment handler from environment to avoid requiring Enrich maps
     config = Config.from_env()
-    deps = create_dependencies(config)
-    enrichment = deps['enrichment']
+    if not config.mongodb_uri or not config.db_name:
+        return {"error": "Server misconfiguration: missing MONGODB_URI/DB_NAME"}, 500
+    enrichment = EnrichmentHandler(config.mongodb_uri, config.db_name)
     
     hypothesis = check_hypothesis(hypotheses, current_user_id, enrich_id, go_id, hypothesis_id)
     if hypothesis:
@@ -127,7 +149,8 @@ def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, hypotheses
     variant_id = enrich_data['variant']
     phenotype = enrich_data['phenotype']
     coexpressed_gene_names = go_term[0]["genes"]
-    causal_graph = enrich_data['causal_graph']
+    # causal_graph = enrich_data['causal_graph']
+    causal_graph = get_mock_causal_graph()
 
     logger.info(f"Enrich data: {enrich_data}")
 
@@ -186,7 +209,11 @@ def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, hypotheses
 
 
 
-@flow(log_prints=True)
+@flow(
+    log_prints=True,
+    persist_result=False,
+    task_runner=_choose_task_runner()
+)
 def analysis_pipeline_flow(projects_handler, analysis_handler, mongodb_uri, db_name, user_id, project_id, gwas_file_path, ref_genome="GRCh37", 
                            population="EUR", batch_size=5, max_workers=3,
                            maf_threshold=0.01, seed=42, window=2000, L=-1, 

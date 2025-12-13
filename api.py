@@ -17,6 +17,63 @@ from utils import allowed_file, transform_credible_sets_to_locuszoom
 from loguru import logger
 from werkzeug.utils import secure_filename
 from utils import serialize_datetime_fields
+import jwt
+import os
+
+
+class RegisterAPI(Resource):
+    def __init__(self, users_handler):
+        self.users = users_handler
+
+    def post(self):
+        try:
+            data = request.get_json() or {}
+            email = data.get('email')
+            password = data.get('password')
+
+            if not email or not password:
+                return {"error": "email and password are required"}, 400
+
+            result, status = self.users.create_user(email, password)
+            return result, status
+        except Exception as e:
+            logger.error(f"Error in /register: {str(e)}")
+            return {"error": "failed to register user"}, 500
+
+
+class LoginAPI(Resource):
+    def __init__(self, users_handler):
+        self.users = users_handler
+
+    def post(self):
+        try:
+            data = request.get_json() or {}
+            email = data.get('email')
+            password = data.get('password')
+
+            if not email or not password:
+                return {"error": "email and password are required"}, 400
+
+            result, status = self.users.verify_user(email, password)
+            if status != 200:
+                return result, status
+
+            # Issue JWT token compatible with auth.token_required
+            jwt_secret = os.getenv("JWT_SECRET")
+            if not jwt_secret:
+                logger.error("JWT_SECRET env variable is not set")
+                return {"error": "server misconfiguration: JWT secret missing"}, 500
+
+            payload = {
+                "user_id": result.get("user_id"),
+                "iat": int(datetime.now(timezone.utc).timestamp()),
+            }
+            token = jwt.encode(payload, jwt_secret, algorithm="HS256")
+            return {"message": "Logged in successfully", "token": token}, 200
+
+        except Exception as e:
+            logger.error(f"Error in /login: {str(e)}")
+            return {"error": "failed to login"}, 500
 
 
 class EnrichAPI(Resource):
@@ -820,6 +877,64 @@ class AnalysisPipelineAPI(Resource):
         except Exception as e:
             logger.error(f"[API] Error starting analysis pipeline: {str(e)}")
             return {"error": f"Error starting analysis pipeline: {str(e)}"}, 500
+
+
+
+class UploadFileAPI(Resource):
+    """
+    Upload-only endpoint: registers an existing GWAS file path and metadata, returns gwasdataid.
+    Does not start any analysis or create a project.
+
+    Expected JSON body:
+      - file_path: absolute or workspace-relative path to the GWAS file
+      - original_filename: optional; display name
+      - filename: optional; stored filename (defaults from file_path basename)
+      - file_type: optional; default 'gwas'
+      - md5_hash: optional; precomputed checksum
+    """
+    def __init__(self, files):
+        self.files = files
+
+    @token_required
+    def post(self, current_user_id):
+        try:
+            data = request.get_json() or {}
+            file_path = data.get('file_path')
+            if not file_path:
+                return {"error": "file_path is required"}, 400
+
+            # Resolve and validate path
+            resolved_path = os.path.abspath(file_path)
+            if not os.path.exists(resolved_path):
+                return {"error": f"file_path does not exist: {resolved_path}"}, 404
+
+            # Derive metadata
+            filename = data.get('filename') or os.path.basename(resolved_path)
+            original_filename = data.get('original_filename') or filename
+            file_type = data.get('file_type') or 'gwas'
+            md5_hash = data.get('md5_hash')
+
+            try:
+                file_size = os.path.getsize(resolved_path)
+            except Exception:
+                file_size = 0
+
+            # Store metadata only
+            file_metadata_id = self.files.create_file_metadata(
+                user_id=current_user_id,
+                filename=filename,
+                original_filename=original_filename,
+                file_path=resolved_path,
+                file_type=file_type,
+                file_size=file_size,
+                md5_hash=md5_hash,
+            )
+
+            return {"gwasdataid": file_metadata_id}, 201
+
+        except Exception as e:
+            logger.error(f"[API] Upload-only error: {str(e)}")
+            return {"error": f"Failed to register file: {str(e)}"}, 500
 
 
 

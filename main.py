@@ -14,6 +14,9 @@ from api import (
     init_socket_handlers,
     ProjectsAPI,
     AnalysisPipelineAPI,
+    RegisterAPI,
+    LoginAPI,
+    UploadFileAPI,
 )
 from dotenv import load_dotenv
 import os
@@ -34,7 +37,7 @@ def parse_flask_arguments():
     
     # Prolog arguments
     parser.add_argument("--swipl-host", type=str, default="localhost")
-    parser.add_argument("--swipl-port", type=int, default=4242)
+    parser.add_argument("--swipl-port", type=int, default=4242)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
     
     # Data file arguments
     parser.add_argument("--ensembl-hgnc-map", type=str, required=True)
@@ -53,7 +56,7 @@ def setup_api(config):
     app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY")
     app.config['JWT_TOKEN_LOCATION'] = ['headers']
     app.config['JWT_HEADER_NAME'] = 'Authorization'
-    app.config['JWT_HEADER_TYPE'] = 'Bearer'
+    app.config['JWT_HEADER_TYPE'] = 'Bearer'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
 
     # Add these configurations for handling large file uploads
     app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024  # 1GB max upload size
@@ -88,6 +91,12 @@ def setup_api(config):
 
 
     # Setup API endpoints with dependencies
+    api.add_resource(RegisterAPI, "/register", resource_class_kwargs={
+        "users_handler": deps['users']
+    })
+    api.add_resource(LoginAPI, "/login", resource_class_kwargs={
+        "users_handler": deps['users']
+    })
     api.add_resource(EnrichAPI, "/enrich", 
         resource_class_kwargs={
             "enrichr": deps['enrichr'], 
@@ -125,6 +134,9 @@ def setup_api(config):
         "files": deps['files'],
         "analysis": deps['analysis'],
         "config": config
+    })
+    api.add_resource(UploadFileAPI, "/files/upload", resource_class_kwargs={
+        "files": deps['files'],
     })
 
     # Initialize socket handlers 

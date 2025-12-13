@@ -82,6 +82,16 @@ class Enrich:
                 print(f"Couldn't find term {go_id}, {go_name}")
                 desc.append("NA")
 
-        res["Desc"] = desc
-        res.drop(res.columns.difference(["ID", "Term", "Desc", "Adjusted P-value", "Genes"]), inplace=True, axis=1)
+        # res["Desc"] = desc
+        # res.drop(res.columns.difference(["ID", "Term", "Desc", "Adjusted P-value", "Genes"]), inplace=True, axis=1)
+        base_required = ["ID", "Term", "Adjusted P-value", "Genes"]
+        missing = [c for c in base_required if c not in res.columns]
+        if missing:
+            # Raise a descriptive error instead of a pandas KeyError
+            raise ValueError(f"Missing expected enrichment columns: {missing}. Available: {list(res.columns)}")
+
+        # Create/overwrite Desc safely and select final columns
+        res = res.copy()
+        res = res.assign(Desc=desc)
+        res = res.reindex(columns=["ID", "Term", "Desc", "Adjusted P-value", "Genes"])
         return res

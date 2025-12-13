@@ -9,6 +9,9 @@ class TaskState(Enum):
 
 class StatusTracker:
     _instance = None
+    # Ensure the class has a default task handler so instance lookups don't fail in
+    # contexts where initialize() hasn't been called (e.g., Prefect workers)
+    _task_handler = None
     
     def __new__(cls):
         if cls._instance is None:
@@ -52,6 +55,13 @@ class StatusTracker:
     
     def _persist_and_clear(self, hypothesis_id):
         """Persist task history to DB and clear from memory"""
+        # If we don't have a task handler (e.g., not initialized in this process),
+        # skip persistence gracefully to avoid crashing the flow.
+        if self._task_handler is None:
+            # Best-effort: clear from memory to avoid growth
+            if hypothesis_id in self.task_history:
+                del self.task_history[hypothesis_id]
+            return
         if hypothesis_id in self.task_history:
             # Get existing history from DB
             db_history = self._task_handler.get_task_history(hypothesis_id) or []
@@ -77,7 +87,9 @@ class StatusTracker:
     def get_history(self, hypothesis_id):
         """Get complete task history from memory and DB without duplicates"""
         memory_history = self.task_history.get(hypothesis_id, [])
-        db_history = self._task_handler.get_task_history(hypothesis_id) if hypothesis_id in self.completed_hypotheses else []
+        db_history = []
+        if self._task_handler is not None and hypothesis_id in self.completed_hypotheses:
+            db_history = self._task_handler.get_task_history(hypothesis_id) or []
         
         # Combine histories
         combined_history = memory_history + db_history

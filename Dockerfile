@@ -86,10 +86,10 @@ RUN Rscript -e " \
     susie_version <- packageVersion('susieR'); \
     cat('Final susieR version:', as.character(susie_version), '\n'); \
     if (as.character(susie_version) == '0.12.35') { \
-        cat('SUCCESS: susieR 0.12.35 installed correctly!\n'); \
+    cat('SUCCESS: susieR 0.12.35 installed correctly!\n'); \
     } else { \
-        cat('ERROR: Expected 0.12.35 but got', as.character(susie_version), '\n'); \
-        quit(status=1); \
+    cat('ERROR: Expected 0.12.35 but got', as.character(susie_version), '\n'); \
+    quit(status=1); \
     }; \
     "
 
@@ -101,9 +101,9 @@ RUN Rscript -e " \
     BiocManager::install(c('MungeSumstats'), ask=FALSE, update=FALSE); \
     BiocManager::install(c('SNPlocs.Hsapiens.dbSNP155.GRCh37', 'SNPlocs.Hsapiens.dbSNP155.GRCh38'), ask=FALSE, update=FALSE); \
     BiocManager::install(c( \
-        'BSgenome.Hsapiens.UCSC.hg19', \
-        'BSgenome.Hsapiens.UCSC.hg38', \
-        'BSgenome.Hsapiens.1000genomes.hs37d5' \
+    'BSgenome.Hsapiens.UCSC.hg19', \
+    'BSgenome.Hsapiens.UCSC.hg38', \
+    'BSgenome.Hsapiens.1000genomes.hs37d5' \
     ), ask=FALSE, update=FALSE); \
     "
 
@@ -111,7 +111,7 @@ RUN Rscript -e " \
 RUN Rscript -e " \
     library(devtools); \
     withr::with_envvar(c('GITHUB_PAT' = ''), { \
-        install_github('oyhel/vautils', upgrade='never') \
+    install_github('oyhel/vautils', upgrade='never') \
     }) \
     "
 
@@ -124,11 +124,11 @@ RUN Rscript -e " \
     "
 
 # Install uv
-RUN wget -qO- https://astral.sh/uv/install.sh | sh
+RUN pip install uv
 
 # Install Python dependencies
 COPY pyproject.toml .
-RUN uv sync
+RUN uv pip install --system -r pyproject.toml
 
 # Copy application
 COPY . .
