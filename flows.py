@@ -27,30 +27,24 @@ from project_tasks import (
 import pandas as pd
 from datetime import datetime, timezone
 from prefect.task_runners import ThreadPoolTaskRunner
-"""
-Dynamic task runner selection:
-- Prefer DaskTaskRunner if prefect-dask is installed and USE_DASK env var is truthy.
-- Otherwise fall back to ThreadPoolTaskRunner to avoid heavy dependency and long builds.
-"""
-try:
-    from prefect_dask import DaskTaskRunner as _DaskTaskRunner
-except Exception:
-    _DaskTaskRunner = None
-
-def _choose_task_runner():
-    use_dask = os.getenv("USE_DASK", "0").lower() in ("1", "true", "yes")
-    if use_dask and _DaskTaskRunner is not None:
-        logger.info("[FLOW] Using DaskTaskRunner (prefect-dask detected and USE_DASK=true)")
-        return _DaskTaskRunner(cluster_kwargs={"n_workers": 4, "threads_per_worker": 1})
-    logger.info("[FLOW] Using ThreadPoolTaskRunner (prefect-dask missing or USE_DASK=false)")
-    return ThreadPoolTaskRunner(max_workers=4)
+from prefect_dask import DaskTaskRunner
 
 from utils import emit_task_update
-from config import Config
+from config import Config, create_dependencies
 from db import EnrichmentHandler
 
 ### Enrichment Flow
-@flow(log_prints=True, persist_result=False, task_runner=ThreadPoolTaskRunner(max_workers=4))
+@flow(
+    log_prints=True, 
+    persist_result=False, 
+    task_runner=DaskTaskRunner(
+        cluster_kwargs={
+            "n_workers": 4,
+            "threads_per_worker": 1,
+            "preload": ["/app/dask_preload.py"]
+        }
+    )
+)
 def enrichment_flow(current_user_id, phenotype, variant, hypothesis_id, project_id):
     """
     Fully project-based enrichment flow that initializes dependencies from centralized config
@@ -70,21 +64,21 @@ def enrichment_flow(current_user_id, phenotype, variant, hypothesis_id, project_
         logger.info(f"Running project-based enrichment for project {project_id}, variant {variant}")
         
         # Check for existing enrichment data
-        enrich = check_enrich.submit(deps['enrichment'], current_user_id, variant, phenotype, hypothesis_id).result()
+        enrich = check_enrich.submit(current_user_id, variant, phenotype, hypothesis_id).result()
         
         if enrich:
             logger.info("Retrieved enrich data from saved db")
             return {"id": enrich['id']}, 200
 
         # Run enrichment analysis pipeline
-        candidate_genes = get_candidate_genes.submit(prolog_query, variant, hypothesis_id).result()
-        causal_gene = predict_causal_gene.submit(llm, phenotype, candidate_genes, hypothesis_id).result()
+        candidate_genes = get_candidate_genes.submit(variant, hypothesis_id).result()
+        causal_gene = predict_causal_gene.submit(phenotype, candidate_genes, hypothesis_id).result()
         print("CAUSAL GENE",causal_gene)
-        causal_graph, proof = get_relevant_gene_proof.submit(prolog_query, variant, causal_gene, hypothesis_id).result()
+        causal_graph, proof = get_relevant_gene_proof.submit(variant, causal_gene, hypothesis_id).result()
 
         if causal_graph is None:
-            causal_gene = retry_predict_causal_gene.submit(llm, phenotype, candidate_genes, proof, causal_gene, hypothesis_id).result()
-            causal_graph, proof = retry_get_relevant_gene_proof.submit(prolog_query, variant, causal_gene, hypothesis_id).result()
+            causal_gene = retry_predict_causal_gene.submit(phenotype, candidate_genes, proof, causal_gene, hypothesis_id).result()
+            causal_graph, proof = retry_get_relevant_gene_proof.submit(variant, causal_gene, hypothesis_id).result()
             logger.info(f"Retried causal gene: {causal_gene}")
             logger.info(f"Retried causal graph: {causal_graph}")
 
@@ -93,7 +87,7 @@ def enrichment_flow(current_user_id, phenotype, variant, hypothesis_id, project_
 
         # Create enrichment data with project context
         enrich_id = create_enrich_data.submit(
-            deps['enrichment'], hypotheses, current_user_id, project_id, variant, 
+            current_user_id, project_id, variant, 
             phenotype, causal_gene, relevant_gos, causal_graph, hypothesis_id
         ).result()
 
@@ -209,10 +203,15 @@ def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, hypotheses
 
 
 
-@flow(
-    log_prints=True,
-    persist_result=False,
-    task_runner=_choose_task_runner()
+@flow(log_prints=True, 
+    persist_result=False, 
+    task_runner=DaskTaskRunner(
+        cluster_kwargs={
+            "n_workers": 4,
+            "threads_per_worker": 1,
+            "preload": ["/app/dask_preload.py"]
+        }
+    )
 )
 def analysis_pipeline_flow(projects_handler, analysis_handler, mongodb_uri, db_name, user_id, project_id, gwas_file_path, ref_genome="GRCh37", 
                            population="EUR", batch_size=5, max_workers=3,
@@ -232,7 +231,7 @@ def analysis_pipeline_flow(projects_handler, analysis_handler, mongodb_uri, db_n
     
     try:
         # Get project-specific output directory (using Prefect task)
-        output_dir = get_project_analysis_path_task.submit(projects_handler, user_id, project_id).result()
+        output_dir = get_project_analysis_path_task.submit(user_id, project_id).result()
         logger.info(f"[PIPELINE] Using output directory: {output_dir}")
         
         # Save initial analysis state
@@ -243,7 +242,7 @@ def analysis_pipeline_flow(projects_handler, analysis_handler, mongodb_uri, db_n
             "message": "Starting MungeSumstats preprocessing",
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
-        save_analysis_state_task.submit(projects_handler, user_id, project_id, initial_state).result()
+        save_analysis_state_task.submit(user_id, project_id, initial_state).result()
         
         logger.info(f"[PIPELINE] Stage 1: MungeSumstats preprocessing")
         munged_file_result = munge_sumstats_preprocessing.submit(gwas_file_path, output_dir, ref_genome=ref_genome, n_threads=14).result()
@@ -263,7 +262,7 @@ def analysis_pipeline_flow(projects_handler, analysis_handler, mongodb_uri, db_n
             "message": "Preprocessing completed, filtering significant variants",
             "started_at": initial_state["started_at"]
         }
-        save_analysis_state_task.submit(projects_handler, user_id, project_id, preprocessing_state).result()
+        save_analysis_state_task.submit(user_id, project_id, preprocessing_state).result()
         
         logger.info(f"[PIPELINE] Stage 2: Loading and filtering variants")
         significant_df_result = filter_significant_variants.submit(munged_df, output_dir).result()
@@ -281,7 +280,7 @@ def analysis_pipeline_flow(projects_handler, analysis_handler, mongodb_uri, db_n
             "progress": 50,
             "message": "Filtering completed, running COJO analysis"
         }
-        save_analysis_state_task.submit(projects_handler, user_id, project_id, filtering_state).result()
+        save_analysis_state_task.submit(user_id, project_id, filtering_state).result()
         
         logger.info(f"[PIPELINE] Stage 3: COJO analysis")
        
@@ -304,7 +303,7 @@ def analysis_pipeline_flow(projects_handler, analysis_handler, mongodb_uri, db_n
                 "progress": 50,
                 "message": "COJO analysis failed - no independent signals found",
             }
-            save_analysis_state_task.submit(projects_handler, user_id, project_id, failed_state).result()
+            save_analysis_state_task.submit(user_id, project_id, failed_state).result()
             return None
         
         # Update analysis state after COJO
@@ -314,7 +313,7 @@ def analysis_pipeline_flow(projects_handler, analysis_handler, mongodb_uri, db_n
             "progress": 70,
             "message": "COJO analysis completed, starting fine-mapping"
         }
-        save_analysis_state_task.submit(projects_handler, user_id, project_id, cojo_state).result()
+        save_analysis_state_task.submit(user_id, project_id, cojo_state).result()
         
         logger.info(f"[PIPELINE] Stage 4: Multiprocessing fine-mapping)")
         logger.info(f"[PIPELINE] Processing {len(cojo_results)} regions with {batch_size} regions per batch")
@@ -392,7 +391,7 @@ def analysis_pipeline_flow(projects_handler, analysis_handler, mongodb_uri, db_n
             combined_results = pd.concat(all_results, ignore_index=True)
             
             # Save results using Prefect tasks
-            results_file = create_analysis_result_task.submit(analysis_handler, user_id, project_id, combined_results, output_dir).result()
+            results_file = create_analysis_result_task.submit(user_id, project_id, combined_results, output_dir).result()
             
             # Summary statistics
             total_variants = len(combined_results)
@@ -405,7 +404,7 @@ def analysis_pipeline_flow(projects_handler, analysis_handler, mongodb_uri, db_n
                 "progress": 100,
                 "message": "Analysis completed successfully",
             }
-            save_analysis_state_task.submit(projects_handler, user_id, project_id, completed_state).result()
+            save_analysis_state_task.submit(user_id, project_id, completed_state).result()
             
             logger.info(f"[PIPELINE] Analysis completed successfully!")
             logger.info(f"[PIPELINE] - Total variants: {total_variants}")
@@ -429,7 +428,7 @@ def analysis_pipeline_flow(projects_handler, analysis_handler, mongodb_uri, db_n
                 "progress": 70,
                 "message": "Fine-mapping failed - no results generated",
             }
-            save_analysis_state_task.submit(projects_handler, user_id, project_id, failed_finemap_state).result()
+            save_analysis_state_task.submit(user_id, project_id, failed_finemap_state).result()
             raise RuntimeError("All fine-mapping batches failed")
             
     except Exception as e:
@@ -442,7 +441,7 @@ def analysis_pipeline_flow(projects_handler, analysis_handler, mongodb_uri, db_n
                 "progress": 0,
                 "message": f"Analysis pipeline failed: {str(e)}",
             }
-            save_analysis_state_task.submit(projects_handler, user_id, project_id, failed_state).result()
+            save_analysis_state_task.submit(user_id, project_id, failed_state).result()
         except Exception as state_e:
             logger.error(f"[PIPELINE] Failed to save error state: {str(state_e)}")
         raise

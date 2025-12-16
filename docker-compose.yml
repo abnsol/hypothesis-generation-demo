@@ -90,7 +90,7 @@ services:
       --swipl-port 4242
       "
     environment:
-    - PREFECT_API_URL=http://prefect-service:4200/api
+      - PREFECT_API_URL=http://prefect-service:4200/api
     depends_on:
       prefect-service:
         condition: service_healthy
