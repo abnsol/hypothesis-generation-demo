@@ -33,16 +33,22 @@ from utils import emit_task_update
 from config import Config, create_dependencies
 from db import EnrichmentHandler
 
+def get_preload_path():
+    paths = os.getenv("DASK_PRELOAD_PATHS", "")
+    return [p for p in paths.split(",") if p.strip()]
+
 ### Enrichment Flow
 @flow(
     log_prints=True, 
     persist_result=False, 
     task_runner=DaskTaskRunner(
-        cluster_kwargs={
-            "n_workers": 4,
-            "threads_per_worker": 1,
-            "preload": ["/app/dask_preload.py"]
-        }
+        address=os.getenv("DASK_ADDRESS")
+        # cluster_kwargs={
+        #     # "n_workers": 2,
+        #     # "threads_per_worker": 1,
+        #     # "preload": get_preload_path(),
+        #     # "silence_logs": "error",
+        # }
     )
 )
 def enrichment_flow(current_user_id, phenotype, variant, hypothesis_id, project_id):
@@ -206,11 +212,13 @@ def hypothesis_flow(current_user_id, hypothesis_id, enrich_id, go_id, hypotheses
 @flow(log_prints=True, 
     persist_result=False, 
     task_runner=DaskTaskRunner(
-        cluster_kwargs={
-            "n_workers": 4,
-            "threads_per_worker": 1,
-            "preload": ["/app/dask_preload.py"]
-        }
+        address=os.getenv("DASK_ADDRESS")
+        # cluster_kwargs={
+        #     "n_workers": 2,
+        #     "threads_per_worker": 1,
+        #     "preload": get_preload_path(),
+        #     "silence_logs": "error",
+        # }
     )
 )
 def analysis_pipeline_flow(projects_handler, analysis_handler, mongodb_uri, db_name, user_id, project_id, gwas_file_path, ref_genome="GRCh37", 

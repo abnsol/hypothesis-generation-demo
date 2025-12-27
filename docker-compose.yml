@@ -31,6 +31,11 @@ services:
     environment:
       - FLASK_ENV=development
       - PREFECT_API_URL=http://prefect-service:4200/api
+      - PYTHONPATH=/app
+      - DASK_ADDRESS=tcp://flask-app:8786
+      - ENSEMBL_HGNC_MAP=/app/data/ensembl_to_hgnc.pkl
+      - HGNC_ENSEMBL_MAP=/app/data/hgnc_to_ensembl.pkl
+      - GO_MAP=/app/data/go_map.pkl
     env_file:
       - .env
     volumes:
@@ -43,8 +48,10 @@ services:
       - prefect-service
     command: >
       sh -c "
-      python main.py --ensembl-hgnc-map data/ensembl_to_hgnc.pkl --hgnc-ensembl-map data/hgnc_to_ensembl.pkl \
-      --go-map data/go_map.pkl --swipl-host prolog-service --swipl-port 4242 
+        set -e
+        dask scheduler --host 0.0.0.0 --port 8786 --dashboard-address :8787 &
+        dask worker tcp://flask-app:8786 --nworkers 2 --nthreads 1 --memory-limit 0 --preload dask_preload &
+        exec python main.py --ensembl-hgnc-map data/ensembl_to_hgnc.pkl --hgnc-ensembl-map data/hgnc_to_ensembl.pkl --go-map data/go_map.pkl --swipl-host prolog-service --swipl-port 4242
       "
     networks:
       - app_network

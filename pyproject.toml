@@ -23,7 +23,6 @@ dependencies = [
     "pengines",
     "flask-cors",
     "prefect",
-    "prefect-dask",
     "flask-socketio",
     "eventlet",
     "python-socketio",
@@ -41,6 +40,8 @@ dependencies = [
     "psutil",
     "rpy2", 
     "google-generativeai",
-    # Optional but recommended when using DaskTaskRunner locally
-    "dask[distributed]"
+    "prefect-dask",
+    "dask[distributed]",
+    "gunicorn",
+    "gevent"
 ]

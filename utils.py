@@ -8,6 +8,7 @@ import socketio as sio
 import os
 import pandas as pd
 import numpy as np
+from dask.distributed import get_worker
 
 def emit_task_update(hypothesis_id, task_name, state, progress=0, details=None, next_task=None, error=None):
     """
@@ -181,3 +182,11 @@ def transform_credible_sets_to_locuszoom(credible_sets_data):
         },
         "lastPage": None
     }
+
+def get_deps():
+    worker = get_worker()
+    deps = getattr(worker, "deps", None)
+    if not deps:
+        err = getattr(worker, "deps_error", "unknown")
+        raise RuntimeError(f"Worker dependencies not initialized: {err}")
+    return deps
