@@ -5,15 +5,14 @@ from loguru import logger
 class BaseHandler:
     """Base handler class with common MongoDB operations"""
     
-    def __init__(self, uri, db_name):
-        self.uri = uri
+    def __init__(self, client, db_name):
+        self.client = client
         self.db_name = db_name
         try:
-            self.client = MongoClient(uri)
             self.db = self.client[db_name]
             logger.info(f"Successfully connected to MongoDB database: {db_name}")
         except Exception as e:
-            logger.error(f"Failed to connect to MongoDB at {uri}: {str(e)}")
+            logger.error(f"Failed to connect to MongoDB at {db_name}: {str(e)}")
             raise ConnectionError(f"Cannot connect to MongoDB: {str(e)}")
     
     def _serialize_object_id(self, doc):

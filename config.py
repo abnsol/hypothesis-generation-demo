@@ -4,7 +4,7 @@ from llm import LLM
 from query_swipl import PrologQuery
 from db import (
     UserHandler, ProjectHandler, FileHandler, AnalysisHandler,
-    EnrichmentHandler, HypothesisHandler, SummaryHandler, TaskHandler
+    EnrichmentHandler, HypothesisHandler, SummaryHandler, TaskHandler, mongo_client
 )
 
 class Config:
@@ -85,16 +85,18 @@ def create_dependencies(config):
     if not mongodb_uri or not db_name:
         raise ValueError("Missing required MongoDB configuration: MONGODB_URI and DB_NAME environment variables must be set")
     
+    client = mongo_client.get_mongo_client(mongodb_uri)
     return {
         'enrichr': enrichr,
         'llm': llm,
         'prolog_query': prolog_query,
-        'users': UserHandler(mongodb_uri, db_name),
-        'projects': ProjectHandler(mongodb_uri, db_name),
-        'files': FileHandler(mongodb_uri, db_name),
-        'analysis': AnalysisHandler(mongodb_uri, db_name),
-        'enrichment': EnrichmentHandler(mongodb_uri, db_name),
-        'hypotheses': HypothesisHandler(mongodb_uri, db_name),
-        'summaries': SummaryHandler(mongodb_uri, db_name),
-        'tasks': TaskHandler(mongodb_uri, db_name)
+        'users': UserHandler(client, config.db_name),
+        'projects': ProjectHandler(client, config.db_name),
+        'files': FileHandler(client, config.db_name),
+        'analysis': AnalysisHandler(client, config.db_name),
+        'enrichment': EnrichmentHandler(client, config.db_name),
+        'hypotheses': HypothesisHandler(client, config.db_name),
+        'summaries': SummaryHandler(client, config.db_name),
+        'tasks': TaskHandler(client, config.db_name),
     }
+
