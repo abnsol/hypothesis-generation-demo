@@ -39,9 +39,10 @@ dependencies = [
     "PyYAML",
     "psutil",
     "rpy2", 
-    "google-generativeai",
+    "google-generativeai", 
     "prefect-dask",
     "dask[distributed]",
     "gunicorn",
-    "gevent"
+    "gevent",
+    "gevent-websocket"
 ]
