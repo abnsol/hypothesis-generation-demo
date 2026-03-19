@@ -14,7 +14,7 @@ from loguru import logger
 from app.core import setup_logging, sio
 from app.core.deps import create_dependencies
 from app.core.config import get_settings, Settings
-from app.api import router
+from app.api.routes import api_router
 
 
 def create_app(config: Settings) -> python_socketio.ASGIApp:
@@ -42,7 +42,7 @@ def create_app(config: Settings) -> python_socketio.ASGIApp:
         allow_headers=["*"],
     )
 
-    fastapi_app.include_router(router)
+    fastapi_app.include_router(api_router) 
 
     combined_app = python_socketio.ASGIApp(sio, fastapi_app)
     return combined_app
